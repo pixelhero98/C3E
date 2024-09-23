@@ -9,7 +9,8 @@ from graph_nn_optimization import GraphNNOptimization, round_to_nearest_even
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dname, root = 'Photo', '/home/PycharmProjects/pythonProject/data'
 #=================================================================================================================================================================
-dataset = Amazon(root, name=dname, transform=T.AddSelfLoops())
+print(f'Current dataset is {dname}:')
+dataset = Planetoid(root, name=dname, transform=T.AddSelfLoops())
 data = dataset[0]
 H = np.log(data.x.shape[0])
 Optimizer = GraphNNOptimization(data)
