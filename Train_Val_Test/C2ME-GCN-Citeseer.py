@@ -36,6 +36,7 @@ for runs in range(10):
 
     if flag == 1:
         break
+        
     best_test_acc = 0
     best_val_acc = 0
     epochsv, epochst = 0, 0
