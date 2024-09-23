@@ -44,7 +44,7 @@ for runs in range(10):
 
     model = AAGNN(num_mmp_layer, num_postpro_layer, num_skip_layer)
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, weight_decay=5e-4) #lr=5e-4 2e-3, weight_decay=5e-4
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, weight_decay=5e-4) #lr=2e-4 2e-3, weight_decay=5e-4
 
     for epoch in range(120):
         loss = train(model, data, p, optimizer)
