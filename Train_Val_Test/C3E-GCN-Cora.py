@@ -8,13 +8,14 @@ from graph_nn_optimization import GraphNNOptimization, round_to_nearest_even
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dname, root = 'Cora', '/home/PycharmProjects/pythonProject/data'
 #================================================================================================================================================================
+print(f'Current dataset is {dname}:')
 dataset = Planetoid(root, name=dname, transform=T.AddSelfLoops())
 data = dataset[0]
 H = np.log(data.x.shape[0])
 Optimizer = GraphNNOptimization(data)
-Optimizer.optimize_weights(k, C, H, True)
+Optimizer.optimize_weights(k, C, H, True) 
+# Round the continuous values to integer width.
 #================================================================================================================================================================
-print(f'Current dataset is {dname}:')
 #num_mmp_layer = [data.x.shape[1], 1982, 1300, 1092, 968, 766] [data.x.shape[1], 1982, 1308, 1080, 947, 726]
 num_mmp_layer = [data.x.shape[1], 1982, 1298, 1094, 986, 722]
 num_postpro_layer = [num_mmp_layer[-1], torch.unique(data.y).shape[0]]
