@@ -48,15 +48,15 @@ for runs in range(10):
         valacc = val(model, data, p,)
         acc = test(model, data, p,)
 
-        #print(f'Val Accuracy={valacc}, Test Accuracy={acc}, Train Loss={loss}, Epoch={epoch}')
+        print(f'Val Accuracy={valacc}, Test Accuracy={acc}, Train Loss={loss}, Epoch={epoch}')
         if valacc > best_val_acc:
             best_val_acc = valacc
-            epochs = epoch
+            epochsv = epoch
 
         if acc > best_test_acc:
             best_test_acc = acc
-            epochs = epoch
+            epochst = epoch
     print(f'Current Run={runs}')
-    print(f'Best Val Accuracy={best_val_acc}, Epoch={epochs}')
-    print(f'Best Test Accuracy={best_test_acc}, Epoch={epochs}')
-    print('====================================================================')
+    print(f'Best Val Accuracy={best_val_acc}, Epoch={epochsv}')
+    print(f'Best Test Accuracy={best_test_acc}, Epoch={epochst}')
+    print('========================')
