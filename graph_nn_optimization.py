@@ -10,20 +10,6 @@ class GraphNNOptimization:
         self.N, self.M = data.x.shape
         self.edge_index, self.edge_attr = data.edge_index, data.edge_attr
 
-    def edge_list_to_adjacency_matrix(self):
-
-        adj = torch.zeros((self.N, self.N), dtype=torch.float32)
-        if self.edge_attr is None:
-            attr = torch.ones(self.edge_index.shape[1], dtype=torch.float32)
-            adj[self.edge_index[0], self.edge_index[1]] = attr
-            adj[self.edge_index[1], self.edge_index[0]] = attr
-        else:
-            attr = self.edge_attr
-            adj[self.edge_index[0], self.edge_index[1]] = attr
-            adj[self.edge_index[1], self.edge_index[0]] = attr
-
-        return adj
-
     def dropouts(self, layers):
 
         p = []
