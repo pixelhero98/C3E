@@ -41,7 +41,7 @@ data = Data(x=data.x, edge_index=data.edge_index, edge_attr=data.edge_attr,
 #=====================================================================================================================================
 
 data, flag, deep, smd = data.to(device), 0, 0, 0
-for runs in range(1):
+for runs in range(10):
 
     if flag == 1:
         break
@@ -55,7 +55,7 @@ for runs in range(1):
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=5e-4)
 
-    for epoch in range(350):
+    for epoch in range(490):
         loss = train(model, data, p, optimizer)
         valacc = val(model, data, p,)
         acc = test(model, data, p,)
