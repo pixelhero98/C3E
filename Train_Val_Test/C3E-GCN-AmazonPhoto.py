@@ -21,6 +21,16 @@ num_mmp_layer = [data.x.shape[1], 830, 538, 446, 400, 370, 350, 274]
 num_postpro_layer = [num_mmp_layer[-1], torch.unique(data.y).shape[0]]
 num_skip_layer = num_mmp_layer[1:]
 p = [0.5269704832368158, 0.393249463591657, 0.4537758691948178, 0.4722366163403161, 0.48017926635004293, 0.48640815762715806, 0.43972497525942633 -0.08]
+
+# Deep variant settings, i.e., simply stacking deeper with the width of original works
+#num_mmp_layer = [data.x.shape[1], 16, 16, 16, 16, 16, 16, 16]
+#num_postpro_layer = [16, torch.unique(data.y).shape[0]]
+#num_skip_layer = [16, 16, 16, 16, 16, 16, 16]
+#p = [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6]
+#num_mmp_layer = [data.x.shape[1], 64, 64, 64, 64, 64, 64, 64]
+#num_postpro_layer = [64, torch.unique(data.y).shape[0]]
+#num_skip_layer = [64, 64, 64, 64, 64, 64, 64]
+#p = [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6]
 num_classes = 8
 train_per_class = 20
 num_val = 1340
