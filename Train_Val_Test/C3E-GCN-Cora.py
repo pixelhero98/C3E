@@ -13,7 +13,7 @@ dataset = Planetoid(root, name=dname, transform=T.AddSelfLoops())
 data = dataset[0]
 H = np.log(data.x.shape[0])
 Optimizer = GraphNNOptimization(data)
-Optimizer.optimize_weights(k, C, H, True) 
+Optimizer.optimize_weights(H, True) 
 # Round the continuous values to integer width.
 #================================================================================================================================================================
 #num_mmp_layer = [data.x.shape[1], 1982, 1300, 1092, 968, 766] [data.x.shape[1], 1982, 1308, 1080, 947, 726]
