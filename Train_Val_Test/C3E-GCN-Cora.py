@@ -2,7 +2,7 @@ import numpy as np
 from gcn_box import *
 import torch_geometric.transforms as T
 from torch_geometric.datasets import Planetoid
-from graph_nn_optimization import GraphNNOptimization, round_to_nearest_even
+from graph_nn_optimization import GraphNNOptimization
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
