@@ -16,17 +16,15 @@ Optimizer = GraphNNOptimization(data)
 Optimizer.optimize_weights(H, True) 
 # Round the continuous values to integer width.
 #================================================================================================================================================================
-num_mmp_layer = [data.x.shape[1], 5270, 3462, 2944, 2682, 1918]
-num_postpro_layer = [num_mmp_layer[-1], torch.unique(data.y).shape[0]]
-num_skip_layer = num_mmp_layer[1:]
-p = [0.5872912604291229, 0.3965438451299066, 0.45944052263339474, 0.4767243263290126, 0.41696622537165207 - 0.06]
+# Set head to 2, since 2 is easily divisible.
+num_mmp_layer = [data.x.shape[1], int(5270/2), 5270, int(3432/2), 3432, int(2862/2), 2862, int(2126/2)]
+num_skip_layer = [5270, 3432, 2862, 2126]
+num_postpro_layer = [2126, torch.unique(data.y).shape[0]]
+p = [0.5872912604291229, 0.3965438451299066, 0.45944052263339474, 0.4767243263290126, 0.41696622537165207 - 0.15]
 
 # Deep variant settings, i.e., simply stacking deeper with the width of original works
-#num_mmp_layer = [data.x.shape[1], 16, 16, 16, 16]
-#num_postpro_layer = [16, torch.unique(data.y).shape[0]]
-#num_skip_layer = [16, 16, 16, 16]
-#p = [0.6, 0.6, 0.6, 0.6]
-#num_mmp_layer = [data.x.shape[1], 64, 64, 64, 64]
+# Set head to 8
+#num_mmp_layer = [data.x.shape[1], 8, 8, 8, 8]
 #num_postpro_layer = [64, torch.unique(data.y).shape[0]]
 #num_skip_layer = [64, 64, 64, 64]
 #p = [0.6, 0.6, 0.6, 0.6, 0.6]
@@ -40,7 +38,6 @@ for runs in range(10):
     best_test_acc = 0
     best_val_acc = 0
     epochsv, epochst = 0, 0
-
 
     model = AAGNN(num_mmp_layer, num_postpro_layer, num_skip_layer)
     model = model.to(device)
