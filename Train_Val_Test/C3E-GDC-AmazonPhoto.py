@@ -33,7 +33,7 @@ p = [0.5162399196092697, 0.40118151874824437, 0.45500949065699114, 0.46880105152
 #num_mmp_layer = [data.x.shape[1], 64, 64, 64, 64, 64]
 #num_postpro_layer = [64, torch.unique(data.y).shape[0]]
 #num_skip_layer = [64, 64, 64, 64, 64]
-#p = [0.6, 0.6, 0.6, 0.6, 0.6]
+#p = [0.6, 0.6, 0.6, 0.6, 0.6] p = [0.5, 0.5, 0.5, 0.5, 0.5]
 num_classes = 8
 train_per_class = 20
 num_val = 1340
