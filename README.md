@@ -14,7 +14,7 @@ Weights: [1982.0861337185738, 1146.535210713598]
 
 Current Model Entropy: 7.942719404150568
 
-Current Constraints/Maximum Graph Entropy: 2.1135356037493027/7.903965634032166
+Current Constraints/Maximum Graph Entropy: 2.1135356037493027/7.903965634032166 #**Current Constraints** is \phi_0 - log(n) in the paper
 
 Dropout Probabilities: [0.5803912569433047, 0.36646659486422706]
 
