@@ -3,10 +3,9 @@
 ## Intro
 1. The Model_box.py contains **gcn_box.py**, **gat_box.py**, and **gdc_box.py** for generating C3E variants with different widths and depths.
 2. The **Train_Val_Test.py** consists of the corresponding training, validation, and testing of C3E variants on various datasets (**Cora**, **Citeseer**, **Pubmed**, **AmazonPhoto**, **AmazonComputers**).
-3. The **Utility.py** has all functions for calculating the entropy of node representation, normalized Dirichlet energy, and other statistics (simply save the model and test it with test masks, and use **get_model_rep()** to retrieve the node representation).
+3. The **Utility.py** has all functions for calculating the entropy of node representation, normalized Dirichlet energy, and other statistics (simply save the model and test it with test masks, and use **get_model_rep()** to retrieve the node representation). Note that for transparency, you may have to use these functions to check these metrics by running them yourself. 
 
-## Demo
-1. Cora (**no graph rewiring, round to the continuous values to the nearest for implementation**):
+## Demo (Cora, **no graph rewiring, round to the continuous values to the nearest for implementation**)
    
 Number of Message-passing Layers: 2
 
@@ -118,3 +117,5 @@ Current Constraints/Maximum Graph Entropy: 10.319195818249089/7.903965634032166
 Dropout Probabilities: [0.5803913802121763, 0.3924449961791494, 0.45767680518138476, 0.47199524120936887, 0.47960098147623675, 0.4840148346130023, 0.4865937880348016, 0.4853926998166548, 0.45592546499143705]
 
 Aspect Ratio: 0.009958661335561432
+
+## To be continued...(more statistical results of different models and datasets)
