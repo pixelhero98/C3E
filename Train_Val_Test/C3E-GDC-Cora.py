@@ -1,5 +1,5 @@
 import numpy as np
-from gcn_box import *
+from gdc_box import *
 import torch_geometric.transforms as T
 from torch_geometric.datasets import Planetoid
 from graph_nn_optimization import GraphNNOptimization
