@@ -1,5 +1,6 @@
 from gcn_box import *
 from gat_box import *
+from gdc_box import *
 import torch_geometric.transforms as T
 from torch_geometric.datasets import Planetoid, Amazon
 from graph_nn_optimization import *
@@ -15,7 +16,7 @@ def get_model_rep(loaded_model, data, p):
     try:
         for layer in layers:
             hooks.append(layer.register_forward_hook(lambda module, input, output: ops.append(output)))
-        loaded_model(data.x, data.edge_index, p)
+        loaded_model(data.x, data.edge_index, p) #loaded_model(data.x, data.edge_index, p, data.edge_attr) for models explicitly using edge weight, e.g., GDCs
     finally:
         for hook in hooks:
             hook.remove()
@@ -25,7 +26,7 @@ def get_model_rep(loaded_model, data, p):
 def rep_entropy(rep):
 
     rep = rep.view(-1)
-    p = F.softmax(rep, dim=0)
+    p = F.softmax(rep, dim=0) # re-mapping the values with softmax, otherwise, the entropy will be excessively high
     uniq, occs = torch.unique(p, return_counts=True)
     p = uniq * occs
   
@@ -62,7 +63,7 @@ def compute_laplacian(edge_index, num_nodes):
 
 def compute_dirichlet_energy(node_features, laplacian_matrix):
     energy = torch.mm(node_features.t(), torch.mm(laplacian_matrix.to(device), node_features))
-    return torch.trace(energy).item()  # Return as a Python float
+    return torch.trace(energy).item()  # Return as a float
 
 
 def show_layer_dirichlet_energy(model_rep, data):
