@@ -106,7 +106,7 @@ class GraphNNOptimization:
 
     def print_optimization_results(self, L, weights, current_entropy, current_constraints, H):
         layers = [self.M] + weights.tolist()
-        print(f"Number of Message-passing Layers: {L}")
+        print(f"Number of Propagation Layers: {L}")
         print(f"Weights: {weights.tolist()}")
         print(f"Current Model Entropy: {current_entropy}")
         print(f"Current Constraints/Maximum Graph Entropy: {current_constraints}/{H}")
