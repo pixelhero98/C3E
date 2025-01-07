@@ -63,8 +63,8 @@ class GraphNNOptimization:
         if any(w_i > reg_m for w_i in w):
             return psi
 
-        return -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1]/d)) + np.log(w[-1]))
-
+        return -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1]/d)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))) # Fast approximation of GCN
+        # -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1] * delta)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))), for other model please calculate delta (variance of propagation matrix Delta)
     def constraint(self, x, H):
 
         w = x
