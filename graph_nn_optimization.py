@@ -43,11 +43,11 @@ class GraphNNOptimization:
 
         if self.M == 0:
             raise ValueError("The number of features (M) must be greater than 0.")
-        inv_avg_degree = 1/self.calculate_average_node_degree() # Fast approximation of GCN
-        # inv_avg_degree = var_propagation, for other models please calculate the variance of delta.
+        reg = self.calculate_average_node_degree() # Fast approximation of GCN
+        # reg = var_propagation, for other models please calculate the variance of delta.
         
-        if inv_avg_degree >= 1:
-            reg_m = self.M * ((1/inv_avg_degree) ** inv_avg_degree)
+        if reg >= 1:
+            reg_m = self.M * (reg ** (1/reg))
         else:
             reg_m = self.M
 
