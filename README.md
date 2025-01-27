@@ -13,7 +13,7 @@ Weights: [1982.0861337185738, 1146.535210713598]
 
 Current Channel Capacity: 7.942719404150568
 
-Current Constraints: 2.1135356037493027/7.903965634032166 #**Current Constraints** is \phi_0 - log(n) in the paper
+Current Constraints: 2.1135356037493027/7.903965634032166 #**Current Constraints** is \phi_0 - ln(n) \in [0, ln(n)/\eta - ln(n)] in the paper
 
 Dropout Probabilities: [0.5803912569433047, 0.36646659486422706]
 
