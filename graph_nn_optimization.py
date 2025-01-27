@@ -20,7 +20,7 @@ class GraphNNOptimization:
 
         return p
 
-    def aspect_ratio(self, layers):
+    def rep_compression_ratio(self, layers, channel_capacity):
 
         if len(layers) <= 1:
             raise ValueError("Aspect ratio requires at least two layers (excluding the input layer).")
@@ -28,7 +28,7 @@ class GraphNNOptimization:
         depth = len(layers)
         geo_mean = prod ** (1 / depth)
 
-        return depth / geo_mean
+        return channel_capacity / geo_mean
 
     def calculate_average_node_degree(self):
 
@@ -64,7 +64,8 @@ class GraphNNOptimization:
             return psi
 
         return -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1]/d)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))) # Fast approximation of GCN
-        # -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1] * delta)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))), for other model please calculate delta (variance of propagation matrix Delta)
+        # -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1] * delta)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))), for other models please calculate delta (variance of propagation matrix Delta)
+    
     def constraint(self, x, H):
 
         w = x
@@ -108,8 +109,8 @@ class GraphNNOptimization:
         layers = [self.M] + weights.tolist()
         print(f"Number of Propagation Layers: {L}")
         print(f"Weights: {weights.tolist()}")
-        print(f"Current Model Entropy: {current_entropy}")
+        print(f"Current Channel Capacity: {current_entropy}")
         print(f"Current Constraints/Maximum Graph Entropy: {current_constraints}/{H}")
         print(f"Dropout Probabilities: {self.dropouts(layers)}")
-        print(f"Aspect Ratio: {self.aspect_ratio(layers)}")
+        print(f"Representation Compression Ratio: {self.rep_compression_ratio(layers, current_entropy)}")
         print("\n")
