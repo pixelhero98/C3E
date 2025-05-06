@@ -99,7 +99,7 @@ def fla(rep):
 
   return blank
 
-# Functions for statistics of Node vector
+# Functions for statistics of Node vector.
 def node_fla(rep):
 
   blank = []
