@@ -97,7 +97,7 @@ class GraphNNOptimization:
                     entropy = -self.objective(result.x)
                     self.print_optimization_results(L, widths, entropy, current_constraints, H)
 
-                if current_constraints > (1/0.49) * H: # eta = 0.49, this can be tuned 
+                if current_constraints > (1/0.49) * H: # eta = 0.49, this can be tuned.
                     break
             else:
                 print("Optimization failed for L =", L, ". Please check the constraints and initial conditions.")
