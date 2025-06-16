@@ -1,116 +1,141 @@
-import torch
 import numpy as np
 from scipy.optimize import minimize
-
+from typing import Optional, List
 
 class GraphNNOptimization:
-    def __init__(self, data):
+    """
+    Estimate propagation layers and their hidden dimensions for a graph neural network with C3E.
+    """
 
+    def __init__(self, data, eta, sigma_s: Optional[np.ndarray] = None) -> None:
+        """
+        :param data: Graph data object with attributes:
+                     - x: node feature matrix of shape (N, M)
+                     - num_edges: total number of edges
+        :param sigma_s: optional per-layer propagation matrix variance scales array
+        """
         self.data = data
         self.N, self.M = data.x.shape
-        self.edge_index, self.edge_attr = data.edge_index, data.edge_attr
+        self.d = data.num_edges / self.N
+        self.penalty = 1e5
+        self.sigma_s = sigma_s
+        self.eta = eta
 
-    def dropouts(self, layers):
+    def dropouts(self, layers: List[float]) -> List[float]:
+        """
+        Compute dropout probabilities between successive layers.
+        """
+        w = np.array(layers)
+        w = np.insert(w, 0, self.M)
+        c = (w[:-1] * w[1:]) / (w[:-1] + w[1:])
+        return (1 - c / w[1:]).tolist()
 
-        p = []
-        for idx in range(len(layers) - 1):
-            w0, w1 = layers[idx], layers[idx + 1]
-            c = (w0 * w1) / (w0 + w1)
-            p.append(1 - (c / w1))
-
-        return p
-
-    def rep_compression_ratio(self, layers, channel_capacity):
-
-        if len(layers) <= 1:
-            raise ValueError("Aspect ratio requires at least two layers (excluding the input layer).")
+    def rep_compression_ratio(self, layers: List[float], channel_capacity: float) -> float:
+        """
+        Compute representation compression ratio: network channel capacity divided by geometric mean of hidden dimensions.
+        """
         prod = np.prod(layers)
-        depth = len(layers)
-        geo_mean = prod ** (1 / depth)
-
+        geo_mean = prod ** (1.0 / len(layers))
         return channel_capacity / geo_mean
 
-    def calculate_average_node_degree(self):
+    def regularized_feature_dim(self) -> float:
+        """
+        Regularize feature dimension based on average node degree.
+        """
+        if self.M <= 0:
+            raise ValueError("The number of features (M) must be > 0.")
+        return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
 
-        total_edges = self.data.num_edges
-        num_nodes = self.N
-        if num_nodes == 0:
-            raise ValueError("The graph must contain at least one node.")
-
-        return total_edges / num_nodes
-
-    def regularized_feature_dim(self):
-
-        if self.M == 0:
-            raise ValueError("The number of features (M) must be greater than 0.")
-        reg = self.calculate_average_node_degree() # Fast approximation of GCN
-        # reg = var_propagation, for other models please calculate the variance of delta.
-        
-        if reg >= 1:
-            reg_m = self.M * (reg ** (1/reg))
-        else:
-            reg_m = self.M
-
-        return reg_m
-
-    def objective(self, x):
-
+    def objective(self, w: np.ndarray) -> float:
+        """
+        Objective: negative channel capacity (to minimize).
+        """
         reg_m = self.regularized_feature_dim()
-        d = self.calculate_average_node_degree()
-        w = x
-        psi = 100000
+        # penalize widths exceeding reg_m + 1 margin
+        if np.any(w > (reg_m + 1)):
+            return self.penalty
 
-        if any(w_i > reg_m for w_i in w):
-            return psi
+        term1 = np.log(2 * np.pi * np.e)
+        term2 = np.sum(np.log(w[:-1])) + np.log(self.M)
+        term3 = np.sum(np.log(self.sigma_s)) if self.sigma_s is not None else np.sum(np.log(1.0 / self.d))
+        term4 = len(w) * np.log(self.N)
+        return -0.5 * (term1 + term2 + term3 + term4)
 
-        return -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1]/d)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))) # Fast approximation of GCN
-        # -0.5 * (np.log(2 * np.pi * np.exp(1)) + np.sum(np.log(w[:-1] * delta)) + np.log(w[-1]) + np.log(len(w[:-1] * self.N))), for other models please calculate delta (variance of propagation matrix Delta)
-    
-    def constraint(self, x, H):
-
-        w = x
-        terms = [np.log(self.M * w[0] / (self.M + w[0]))]
-
-        for i in range(1, len(w)):
-            terms.append((1 / (i + 1)) * np.log(w[i - 1] * w[i] / (w[i - 1] + w[i])))
-
-        return sum(terms) - H
-
-    def optimize_weights(self, H, verbose=False):
-
-        L = 2  # Initialize with at least 2 message-passing layers
-
-        while True:
-            w_initial = np.ones(L)  # Initialize widths for these layers
-            bounds = [(1, (self.N - 1) * self.M)]  # Bounds for weights
-
-            # Perform the optimization given L
-            constraints = [{'type': 'ineq', 'fun': lambda w: self.constraint(w, H)}]
-            result = minimize(lambda w: self.objective(w), w_initial, method='SLSQP', bounds=bounds,
-                              constraints=constraints)
-
-            if result.success:
-                current_constraints = self.constraint(result.x, H)
-
-                if verbose:
-                    widths = result.x
-                    entropy = -self.objective(result.x)
-                    self.print_optimization_results(L, widths, entropy, current_constraints, H)
-
-                if current_constraints > (1/0.49) * H: # eta = 0.49, this can be tuned.
-                    break
+    def constraint(self, w: np.ndarray, H: float = 0.0) -> float:
+        """
+        Inequality constraint: sum of log-terms minus H >= 0.
+        """
+        terms = []
+        for i in range(len(w)):
+            if i == 0:
+                terms.append(np.log(self.M * w[0] / (self.M + w[0])))
             else:
-                print("Optimization failed for L =", L, ". Please check the constraints and initial conditions.")
+                num = np.log(w[i-1] * w[i] / (w[i-1] + w[i]))
+                terms.append(num / (i + 1))
+        # Plain approximation
+        # for i in range(len(w)):
+        #     if i == 0:
+        #         numerator = np.log(self.M * w[0] / (self.M + w[0]))
+        #         denom = np.log(2*np.pi*np.e)/np.log(self.N*self.M*self.sigma_s[i]) + i + 1
+        #         terms.append(numerator/denom)
+        #     else:
+        #         numerator = np.log(w[i-1]*w[i]/(w[i-1]+w[i]))
+        #         denom = np.log(2*np.pi*np.e)/np.log(self.N*w[i-1]*self.sigma_s[i]) + i + 1
+        #         terms.append(numerator/denom)
+        return float(np.sum(terms) - H)
 
-            # Increment L and try for next depth
-            L += 1
+    def optimize_weights(
+        self,
+        H: float,
+        verbose: bool = False,
+        max_layers: int = 100
+    ) -> dict:
+        """
+        Estimate layer widths under lower bound constraint H, up to max_layers.
+        Returns dict with L, weights, entropy, constraint_value.
+        """
+        for L in range(2, max_layers + 1):
+            w0 = np.full(L, 2.0)
+            upper = (self.N - 1) * self.M
+            bounds = [(2.0, upper)] * L
+            cons = {'type': 'ineq', 'fun': lambda w, H=H: self.constraint(w, H)}
 
-    def print_optimization_results(self, L, weights, current_entropy, current_constraints, H):
-        layers = [self.M] + weights.tolist()
-        print(f"Number of Propagation Layers: {L}")
-        print(f"Weights: {weights.tolist()}")
-        print(f"Current Channel Capacity: {current_entropy}")
-        print(f"Current Constraints/Maximum Graph Entropy: {current_constraints}/{H}")
-        print(f"Dropout Probabilities: {self.dropouts(layers)}")
-        print(f"Representation Compression Ratio: {self.rep_compression_ratio(layers, current_entropy)}")
-        print("\n")
+            result = minimize(
+                fun=self.objective,
+                x0=w0,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=[cons]
+            )
+
+            if not result.success:
+                if verbose:
+                    print(f"[L={L}] Optimization failed: {result.message}")
+                continue
+
+            weights = result.x
+            constraint_val = self.constraint(weights, H)
+            entropy = -self.objective(weights)
+
+            if verbose:
+                layers_list = weights.tolist()
+                print("\n=== Estimation Summary ===")
+                print(f"Depth                : {L}")
+                print(f"Hidden dimensions    : {layers_list}")
+                # Rounded hidden dimensions
+                rounded_weights = [int(round(w)) for w in weights]
+                print(f"Rounded hidden dims  : {rounded_weights}")
+                print(f"Network channel capacity: {entropy:.4f}")
+                print(f"Lower bound          : {constraint_val + H:.4f} in [{H:.4f}, {(H / self.eta):.4f}]")
+                print(f"Dropout probabilities: {self.dropouts(layers_list)}")
+                print(f"Rep. compression     : {self.rep_compression_ratio(layers_list, entropy):.4f}")
+
+            if constraint_val + H > H / self.eta:
+                return {
+                    'L': L,
+                    'weights': weights,
+                    'entropy': entropy,
+                    'constraint_value': constraint_val
+                }
+
+        raise RuntimeError(f"Failed to meet lower bound constraint H={H} within {max_layers} layers.")
