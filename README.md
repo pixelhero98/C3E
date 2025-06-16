@@ -162,4 +162,3 @@
     * **Rounded hidden dims**: `[5270, 3359, 2798, 2463, 2203, 1477]`
     * **Dropout probabilities**: `[0.5873, 0.3892, 0.4545, 0.4681, 0.4722, 0.4013]`
     </details>
-## To be continued...(more statistical results of different models and datasets)
