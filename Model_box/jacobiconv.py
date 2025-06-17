@@ -121,12 +121,3 @@ class JACOBIConv(nn.Module):
         # cat and project
         x_cat = torch.cat(xs, dim=1)  # shape [N, (K+1)*in_ch]
         return self.lin(x_cat)
-
-
-class GPRConv(nn.Module):
-   
-        return out
-
-class ChebIIConv(nn.Module):
-   
-        return out
