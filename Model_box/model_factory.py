@@ -92,15 +92,15 @@ class Model(nn.Module):
         # Final classifier
         self.classifier = nn.Linear(prop_layer[-1], num_class)
 
-    def forward(self, x, edge_index):
+    def forward(self, data):
         """
         x:           Node feature matrix of shape [N, prop_layer[0]]
         edge_index: Graph connectivity in COO format
         """
-        h = x
+        h = data.x
         for i, conv in enumerate(self.propagation):
             # Graph convolution
-            h_new = conv(h, edge_index)
+            h_new = conv(h, data.edge_index)
 
             # Add residual for layers beyond the first
             if i > 0:
