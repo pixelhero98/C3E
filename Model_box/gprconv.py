@@ -1,5 +1,6 @@
 import torch
 from torch.nn import Parameter, Linear
+from typing import Optional
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
@@ -9,21 +10,23 @@ class GPRConv(MessagePassing):
     Args:
         in_channels (int): Input feature dimension.
         out_channels (int): Output feature dimension.
-        K (int): Number of propagation steps.
-        alpha (float): Initialization hyperparameter (use int for 'SGC').
-        Init (str): Initialization scheme, one of ['SGC', 'PPR', 'NPPR', 'Random', 'WS'].
-        Gamma (list or Tensor, optional): Pre-specified weights for 'WS' init.
-        bias (bool, optional): If set to False, the layer will not learn an additive bias.
+        K (int, optional): Number of propagation steps. Default is 10.
+        alpha (float, optional): Initialization hyperparameter (use int for 'SGC'). Default is 0.1.
+        Init (str, optional): Initialization scheme, one of ['SGC', 'PPR', 'NPPR', 'Random', 'WS']. Defaults to 'PPR'.
+        Gamma (list or Tensor, optional): Pre-specified weights for 'WS' init. Default is None.
+        bias (bool, optional): If False, the layer will not learn an additive bias. Default is True.
     """
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 K: int,
-                 alpha: float,
-                 Init: str = 'PPR',
-                 Gamma=None,
-                 bias: bool = True,
-                 **kwargs):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        K: int = 10,
+        alpha: float = 0.1,
+        Init: str = 'PPR',
+        Gamma: Optional[torch.Tensor] = None,
+        bias: bool = True,
+        **kwargs
+    ):
         super().__init__(aggr='add', **kwargs)
         self.K = K
         self.Init = Init
@@ -38,24 +41,26 @@ class GPRConv(MessagePassing):
 
         # Initialize propagation coefficients
         if Init == 'SGC':
-            TEMP = torch.zeros(K + 1, dtype=torch.float)
-            idx = int(alpha)
-            if idx < 0 or idx > K:
-                raise ValueError(f"alpha (SGC) must be integer in [0, K], got {alpha}")
+            TEMP = torch.zeros(self.K + 1, dtype=torch.float)
+            idx = int(self.alpha)
+            if idx < 0 or idx > self.K:
+                raise ValueError(f"alpha (SGC) must be integer in [0, K], got {self.alpha}")
             TEMP[idx] = 1.0
         elif Init == 'PPR':
-            arange = torch.arange(K + 1, dtype=torch.float)
-            TEMP = alpha * (1 - alpha) ** arange
-            TEMP[-1] = (1 - alpha) ** K
+            arange = torch.arange(self.K + 1, dtype=torch.float)
+            TEMP = self.alpha * (1 - self.alpha) ** arange
+            TEMP[-1] = (1 - self.alpha) ** self.K
         elif Init == 'NPPR':
-            arange = torch.arange(K + 1, dtype=torch.float)
-            TEMP = alpha ** arange
+            arange = torch.arange(self.K + 1, dtype=torch.float)
+            TEMP = self.alpha ** arange
             TEMP = TEMP / TEMP.abs().sum()
         elif Init == 'Random':
-            bound = (3.0 / (K + 1)) ** 0.5
-            TEMP = torch.empty(K + 1).uniform_(-bound, bound)
+            bound = (3.0 / (self.K + 1)) ** 0.5
+            TEMP = torch.empty(self.K + 1).uniform_(-bound, bound)
             TEMP = TEMP / TEMP.abs().sum()
         else:  # 'WS'
+            if Gamma is None:
+                raise ValueError("Gamma must be provided for 'WS' initialization.")
             TEMP = torch.tensor(Gamma, dtype=torch.float)
 
         self.temp = Parameter(TEMP)
@@ -64,7 +69,6 @@ class GPRConv(MessagePassing):
         """Reinitialize parameters and coefficients according to Init scheme."""
         self.lin.reset_parameters()
         with torch.no_grad():
-            # reuse forward init logic
             if self.Init == 'SGC':
                 self.temp.zero_()
                 self.temp[int(self.alpha)] = 1.0
@@ -112,4 +116,3 @@ class GPRConv(MessagePassing):
                 f'in_channels={self.lin.in_features}, '  \
                 f'out_channels={self.lin.out_features}, '  \
                 f'K={self.K}, Init={self.Init}, alpha={self.alpha})')
-
