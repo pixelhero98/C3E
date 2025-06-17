@@ -2,7 +2,7 @@ import numpy as np
 from scipy.optimize import minimize
 from typing import Optional, List
 
-class CCCE:
+class ChanCapConEst:
     """
     Estimate propagation layers and their hidden dimensions for a graph neural network with C3E.
     """
