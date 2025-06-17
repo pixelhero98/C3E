@@ -70,7 +70,7 @@ class Model(nn.Module):
                 )
             elif key == 'appnp':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1, dropout=0， cached=True, add_self_loops=True, normalize=True, bias=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1, dropout=0， cached=False, add_self_loops=True, normalize=True, bias=True)
                 )
             elif key == 'sgc':
                 self.propagation.append(
