@@ -1,10 +1,3 @@
-from gcn_box import *
-from gat_box import *
-from gdc_box import *
-import torch_geometric.transforms as T
-from torch_geometric.datasets import Planetoid, Amazon
-from graph_nn_optimization import *
-from torch_geometric.data import Data
 import matplotlib.pyplot as plt
 
 
