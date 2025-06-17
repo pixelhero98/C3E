@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, APPNP, SGConv, SSGConv
-from other_conv import GDCPPR, GDCHK, JACOBIConv, GPRConv, ChebIIConv
+from other_conv import JACOBIConv, GPRConv, ChebIIConv
 
 class Model(nn.Module):
     def __init__(
