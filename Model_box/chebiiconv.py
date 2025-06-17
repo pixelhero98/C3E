@@ -5,7 +5,7 @@ from torch.nn import Parameter, Linear
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import get_laplacian
 
-class ChebNetIIConv(MessagePassing):
+class ChebIIConv(MessagePassing):
     """
     ChebNetII convolution layer from
     "Convolutional Neural Networks on Graphs with Chebyshev Approximation, Revisited".
