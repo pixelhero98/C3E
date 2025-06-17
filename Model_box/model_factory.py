@@ -48,14 +48,14 @@ class Model(nn.Module):
             'chebnetii': ChebIIConv
         }
 
-        # Graph convolution layers
+        # Propagation layers
         self.propagation = nn.ModuleList()
         for i, method in enumerate(methods):
             key = method.lower()
             if key not in conv_map:
                 raise ValueError(f"Unknown conv method '{method}' at layer {i}")
             Conv = conv_map[key]
-            # GATConv needs heads; default to 1
+            # Other propagation methods that require more initialization parameters.
             if key == 'jacobi':
                 self.propagation.append(
                     Conv(prop_layer[i], prop_layer[i + 1], K=3, aggr='gcn', a=1.0, b=1.0, cached=True)
@@ -80,6 +80,7 @@ class Model(nn.Module):
                 self.propagation.append(
                     Conv(prop_layer[i], prop_layer[i + 1], alpha=0.1, K=1, cached=False, add_self_loops=True, bias=True)
                 )
+            # Propagation methods require only input and output dimensions.
             else:
                 self.propagation.append(
                     Conv(prop_layer[i], prop_layer[i + 1])
