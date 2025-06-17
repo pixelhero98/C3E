@@ -58,7 +58,7 @@ class Model(nn.Module):
             # GATConv needs heads; default to 1
             if key == 'jacobi':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], heads=1)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=3, aggr='gcn', a=1.0, b=1.0, cached=True)
                 )
             elif key == 'gprgnn':
                 self.propagation.append(
@@ -66,7 +66,7 @@ class Model(nn.Module):
                 )
             elif key == 'chebnetii':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], heads=1)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=1, lambda_max=2.0, cached=True, bias=True)
                 )
             else:
                 self.propagation.append(
