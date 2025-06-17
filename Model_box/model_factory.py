@@ -68,6 +68,18 @@ class Model(nn.Module):
                 self.propagation.append(
                     Conv(prop_layer[i], prop_layer[i + 1], K=1, lambda_max=2.0, cached=True, bias=True)
                 )
+            elif key == 'appnp':
+                self.propagation.append(
+                    Conv(prop_layer[i], prop_layer[i + 1], K=1, lambda_max=2.0, cached=True, bias=True)
+                )
+            elif key == 'sgc':
+                self.propagation.append(
+                    Conv(prop_layer[i], prop_layer[i + 1], K=1, cached=False, add_self_loops=True, bias=True)
+                )
+            elif key == 's2gc':
+                self.propagation.append(
+                    Conv(prop_layer[i], prop_layer[i + 1], alpha=0.1, K=1, cached=False, add_self_loops=True, bias=True)
+                )
             else:
                 self.propagation.append(
                     Conv(prop_layer[i], prop_layer[i + 1])
