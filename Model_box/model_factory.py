@@ -53,7 +53,15 @@ class Model(nn.Module):
                 raise ValueError(f"Unknown conv method '{method}' at layer {i}")
             Conv = conv_map[key]
             # GATConv needs heads; default to 1
-            if key == 'gat':
+            if key == 'jacobi':
+                self.propagation.append(
+                    Conv(prop_layer[i], prop_layer[i + 1], heads=1)
+                )
+            elif key == 'gprgnn':
+                self.propagation.append(
+                    Conv(prop_layer[i], prop_layer[i + 1], heads=1)
+                )
+            elif key == 'chebnetii':
                 self.propagation.append(
                     Conv(prop_layer[i], prop_layer[i + 1], heads=1)
                 )
