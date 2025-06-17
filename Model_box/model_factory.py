@@ -62,7 +62,7 @@ class Model(nn.Module):
                 )
             elif key == 'gprgnn':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], heads=1)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1, Init='PPR', Gamma=None, bias=True)
                 )
             elif key == 'chebnetii':
                 self.propagation.append(
