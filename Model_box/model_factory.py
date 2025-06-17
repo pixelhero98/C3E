@@ -46,7 +46,6 @@ class Model(nn.Module):
             'jacobi': JACOBIConv,
             'gprgnn': GPRConv,
             'chebnetii': ChebIIConv
-            ''
         }
 
         # Graph convolution layers
