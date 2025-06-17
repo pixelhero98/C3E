@@ -1,115 +1,115 @@
-import math
 import torch
-from torch import Tensor
 from torch.nn import Parameter, Linear
 from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import get_laplacian
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
-class ChebNetIIConv(MessagePassing):
-    """
-    ChebNetII convolution layer from
-    "Convolutional Neural Networks on Graphs with Chebyshev Approximation, Revisited".
-
-    Approximates spectral convolutions via Chebyshev interpolation:
-        P_N(x) = sum_{k=0}^N a_k T_k(x),
-    with a_k = (2/(N+1)) sum_{j=0}^N gamma_j T_k(x_j) (except a_0 uses 1/(N+1)).
+class GPRConv(MessagePassing):
+    r"""Generalized PageRank convolution with feature projection.
 
     Args:
-        in_channels (int): Dimension of input features.
-        out_channels (int): Dimension of output features.
-        K (int): Order of Chebyshev polynomials.
-        lambda_max (float): Largest eigenvalue of normalized Laplacian (default 2.0).
-        cached (bool): Whether to cache the Laplacian (default True).
-        bias (bool): If set to False, the layer will not learn an additive bias.
+        in_channels (int): Input feature dimension.
+        out_channels (int): Output feature dimension.
+        K (int): Number of propagation steps.
+        alpha (float): Initialization hyperparameter (use int for 'SGC').
+        Init (str): Initialization scheme, one of ['SGC', 'PPR', 'NPPR', 'Random', 'WS'].
+        Gamma (list or Tensor, optional): Pre-specified weights for 'WS' init.
+        bias (bool, optional): If set to False, the layer will not learn an additive bias.
     """
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
                  K: int,
-                 lambda_max: float = 2.0,
-                 cached: bool = True,
-                 bias: bool = True):
-        super().__init__(aggr='add')  # sum aggregation
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+                 alpha: float,
+                 Init: str = 'PPR',
+                 Gamma=None,
+                 bias: bool = True,
+                 **kwargs):
+        super().__init__(aggr='add', **kwargs)
         self.K = K
-        self.lambda_max = lambda_max
-        self.cached = cached
-        self.linear = Linear(in_channels, out_channels, bias=bias)
+        self.Init = Init
+        self.alpha = alpha
+        self.Gamma = Gamma
 
-        # learnable interpolation values at Chebyshev nodes
-        self.gamma = Parameter(torch.randn(K + 1))
+        # feature projection
+        self.lin = Linear(in_channels, out_channels, bias=bias)
 
-        # precompute Chebyshev nodes x_j = cos((j+0.5)pi/(K+1))
-        j = torch.arange(K + 1, dtype=torch.float)
-        nodes = torch.cos(math.pi * (j + 0.5) / (K + 1))
+        assert Init in ['SGC', 'PPR', 'NPPR', 'Random', 'WS'], \
+            f"Unsupported Init mode '{Init}'"
 
-        # precompute T_k(x_j) matrix via recurrence
-        T = torch.zeros(K + 1, K + 1)
-        T[0] = 1
-        if K >= 1:
-            T[1] = nodes
-        for k in range(2, K + 1):
-            T[k] = 2 * nodes * T[k - 1] - T[k - 2]
+        # Initialize propagation coefficients
+        if Init == 'SGC':
+            TEMP = torch.zeros(K + 1, dtype=torch.float)
+            idx = int(alpha)
+            if idx < 0 or idx > K:
+                raise ValueError(f"alpha (SGC) must be integer in [0, K], got {alpha}")
+            TEMP[idx] = 1.0
+        elif Init == 'PPR':
+            arange = torch.arange(K + 1, dtype=torch.float)
+            TEMP = alpha * (1 - alpha) ** arange
+            TEMP[-1] = (1 - alpha) ** K
+        elif Init == 'NPPR':
+            arange = torch.arange(K + 1, dtype=torch.float)
+            TEMP = alpha ** arange
+            TEMP = TEMP / TEMP.abs().sum()
+        elif Init == 'Random':
+            bound = (3.0 / (K + 1)) ** 0.5
+            TEMP = torch.empty(K + 1).uniform_(-bound, bound)
+            TEMP = TEMP / TEMP.abs().sum()
+        else:  # 'WS'
+            TEMP = torch.tensor(Gamma, dtype=torch.float)
 
-        self.register_buffer('nodes', nodes)
-        self.register_buffer('T_eval', T)
-        self._cached_lap = None
+        self.temp = Parameter(TEMP)
 
     def reset_parameters(self):
-        self.gamma.data.uniform_(-1, 1)
-        self.linear.reset_parameters()
+        """Reinitialize parameters and coefficients according to Init scheme."""
+        self.lin.reset_parameters()
+        with torch.no_grad():
+            # reuse forward init logic
+            if self.Init == 'SGC':
+                self.temp.zero_()
+                self.temp[int(self.alpha)] = 1.0
+            elif self.Init == 'PPR':
+                arange = torch.arange(self.K + 1, dtype=self.temp.dtype, device=self.temp.device)
+                temp = self.alpha * (1 - self.alpha) ** arange
+                temp[-1] = (1 - self.alpha) ** self.K
+                self.temp.copy_(temp)
+            elif self.Init == 'NPPR':
+                arange = torch.arange(self.K + 1, dtype=self.temp.dtype, device=self.temp.device)
+                temp = self.alpha ** arange
+                temp = temp / temp.abs().sum()
+                self.temp.copy_(temp)
+            elif self.Init == 'Random':
+                bound = (3.0 / (self.K + 1)) ** 0.5
+                temp = torch.empty(self.K + 1, dtype=self.temp.dtype, device=self.temp.device).uniform_(-bound, bound)
+                temp = temp / temp.abs().sum()
+                self.temp.copy_(temp)
+            else:  # 'WS'
+                gamma = torch.tensor(self.Gamma, dtype=self.temp.dtype, device=self.temp.device)
+                self.temp.copy_(gamma)
 
-    def forward(self,
-                x: Tensor,
-                edge_index: Tensor,
-                edge_weight: Tensor = None) -> Tensor:
-        """
-        Args:
-            x (Tensor): Node feature matrix [N, in_channels].
-            edge_index (Tensor): Edge indices [2, E].
-            edge_weight (Tensor, optional): Edge weights [E].
+    def forward(self, x, edge_index, edge_weight=None, num_nodes=None):
+        # Compute normalized adjacency (Â = D^{-1/2}(A+I)D^{-1/2})
+        N = x.size(0) if num_nodes is None else num_nodes
+        edge_index, norm = gcn_norm(
+            edge_index, edge_weight, num_nodes=N, dtype=x.dtype)
 
-        Returns:
-            Tensor: Updated node features [N, out_channels].
-        """
-        # Compute (and cache) normalized Laplacian L = get_laplacian
-        if self._cached_lap is None or not self.cached:
-            lap_index, lap_weight = get_laplacian(
-                edge_index, edge_weight, normalization='sym')
-            # scale by 2/lambda_max
-            lap_weight = lap_weight * (2.0 / self.lambda_max)
-            self._cached_lap = (lap_index, lap_weight)
-        else:
-            lap_index, lap_weight = self._cached_lap
+        # 0-hop term
+        out = self.temp[0] * x
+        h = x
+        # propagate for k hops
+        for k in range(self.K):
+            h = self.propagate(edge_index, x=h, norm=norm)
+            out = out + self.temp[k + 1] * h
 
-        # Compute Chebyshev coefficients a_k from gamma and T_eval
-        # a_0 = (1/(K+1)) * sum_j gamma_j * T_0(x_j)
-        # a_k = (2/(K+1)) * sum_j gamma_j * T_k(x_j), for k >= 1
-        Np1 = self.K + 1
-        a = []
-        for k in range(Np1):
-            coef = 1.0 / Np1 if k == 0 else 2.0 / Np1
-            a_k = coef * (self.gamma * self.T_eval[k]).sum()
-            a.append(a_k)
-        a = torch.stack(a)
+        # project features to out_channels
+        return self.lin(out)
 
-        # Recursive Chebyshev propagation
-        out = a[0] * x
-        if self.K >= 1:
-            h = self.propagate(lap_index, x=x, norm=lap_weight)
-            out = out + a[1] * h
-
-        Tkm2, Tkm1 = x, h if self.K >= 1 else (x, x)
-        for k in range(2, Np1):
-            Tkm2, Tkm1 = Tkm1, 2 * self.propagate(lap_index, x=Tkm1, norm=lap_weight) - Tkm2
-            out = out + a[k] * Tkm1
-
-        return self.linear(out)
-
-    def message(self, x_j: Tensor, norm: Tensor) -> Tensor:
-        # Message passing: multiply neighbor features by norm scalar
+    def message(self, x_j, norm):
         return norm.view(-1, 1) * x_j
 
-    def __repr__(self) -> str:
-        return f'{self.__class__.__name__}(in_channels={self.in_channels}, out_channels={self.out_channels}, K={self.K})'
+    def __repr__(self):
+        return (f'{self.__class__.__name__}('  \
+                f'in_channels={self.lin.in_features}, '  \
+                f'out_channels={self.lin.out_features}, '  \
+                f'K={self.K}, Init={self.Init}, alpha={self.alpha})')
+
