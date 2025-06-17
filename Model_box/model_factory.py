@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, APPNP, SGConv, SSGConv
+from torch_geometric.nn import GCNConv, SGConv, SSGConv
 from chebiiconv import ChebIIConv
 from gprconv import GPRConv
-from jacobi import JACOBIConv
+from jacobiconv import JACOBIConv
+from appnpconv import APPNPConv
 
 
 class Model(nn.Module):
@@ -37,7 +38,7 @@ class Model(nn.Module):
         # Map string key to convolution class
         conv_map = {
             'gcn': GCNConv,
-            'appnp': APPNP,
+            'appnp': APPNPConv,
             'gdc_ppr': GCNConv,
             'gdc_hk': GCNConv,
             'sgc': SGConv,
