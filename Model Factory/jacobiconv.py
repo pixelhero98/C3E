@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import Tensor
 from torch_geometric.utils import degree
 from torch_sparse import SparseTensor
@@ -10,10 +9,8 @@ def buildAdj(edge_index: Tensor,
              n_node: int,
              aggr: str = "gcn") -> SparseTensor:
     """
-    Exactly as in impl/PolyConv.py:
-      • deg[deg<0.5] += 1.0
-      • support for 'mean', 'sum', 'gcn'
-      • move to CUDA if needed
+    Constructs (normalized) SparseTensor adjacency exactly as in impl/PolyConv.py.
+    Supports 'mean', 'sum', 'gcn'; moves to CUDA if needed.
     """
     deg = degree(edge_index[0], n_node)
     deg[deg < 0.5] += 1.0
@@ -44,10 +41,10 @@ def JacobiConv(L: int,
                l: float = -1.0,
                r: float = 1.0) -> Tensor:
     """
-    Implements exactly the repository’s JacobiConv recurrence:
-      • L=0: identity
-      • L=1: closed‐form with (l+r)/(r−l) and (r−l)
-      • L≥2: three‐term recurrence (with proper [l,r] shift/scale)
+    Implements the JacobiConv recurrence from GraphPKU's PolyConv:
+      • L=0: returns xs[0]
+      • L=1: closed‐form with domain [l,r]
+      • L>=2: three‐term recurrence with domain scaling
     """
     if L == 0:
         return xs[0]
@@ -58,22 +55,18 @@ def JacobiConv(L: int,
         coef2 = (a + b + 2) / (r - l)
         return alphas[0] * (coef1 * xs[-1] + coef2 * Ax)
 
-    # Compute recurrence coefficients
     coef_l      = 2 * L * (L + a + b) * (2 * L - 2 + a + b)
     coef_lm1_1  = (2 * L + a + b - 1) * (2 * L + a + b) * (2 * L + a + b - 2)
     coef_lm1_2  = (2 * L + a + b - 1) * (a**2 - b**2)
     coef_lm2    = 2 * (L - 1 + a) * (L - 1 + b) * (2 * L + a + b)
 
-    # Original tmp coefficients
     tmp1 = alphas[L - 1] * (coef_lm1_1 / coef_l)
     tmp2 = alphas[L - 1] * (coef_lm1_2 / coef_l)
     tmp3 = alphas[L - 1] * alphas[L - 2] * (coef_lm2 / coef_l)
 
-    # Apply [l, r] shift and scale
     tmp1_2 = tmp1 * (2.0 / (r - l))
     tmp2_2 = tmp1 * ((r + l) / (r - l)) + tmp2
 
-    # Three-term Jacobi recurrence
     return tmp1_2 * Ax \
          - tmp2_2 * xs[-1] \
          - tmp3   * xs[-2]
@@ -81,8 +74,8 @@ def JacobiConv(L: int,
 class JACOBIConv(nn.Module):
     """
     One layer of PolyConvFrame with JacobiConv:
-      - builds [P0 x, P1 x, … PK x]
-      - concatenates and then a final linear map
+      - builds [P0 x, P1 x, … P_K x]
+      - concatenates and a final linear projection
     """
     def __init__(self,
                  in_channels: int,
@@ -93,40 +86,42 @@ class JACOBIConv(nn.Module):
                  b: float = 1.0,
                  cached: bool = True):
         super().__init__()
-        self.K     = K
-        self.aggr  = aggr
-        self.a     = a
-        self.b     = b
-        self.cached= cached
+        self.K      = K
+        self.aggr   = aggr
+        self.a      = a
+        self.b      = b
+        self.cached = cached
 
-        # base‐scale for initialize; repository uses tanh later
+        # base scale for alphas (tanh applied in forward)
         self.basealpha = 1.0
-        # learnable α₀…α_K
-        self.alphas = nn.ParameterList([
-            nn.Parameter(torch.tensor(float(min(1/self.basealpha, 1.0))))
+        self.alphas    = nn.ParameterList([
+            nn.Parameter(torch.tensor(1.0))
             for _ in range(K+1)
         ])
 
-        # final projection
-        self.lin = nn.Linear((K+1)*in_channels, out_channels)
-        self.adj = None
+        self.lin  = nn.Linear((K+1)*in_channels, out_channels)
+        self.adj  = None
 
     def forward(self,
                 x: Tensor,
                 edge_index: Tensor,
-                edge_weight: Tensor) -> Tensor:
+                edge_weight: Tensor = None) -> Tensor:
+        # default to unweighted (all-ones) if not provided
+        if edge_weight is None:
+            edge_weight = x.new_ones(edge_index.size(1))
+
         N = x.size(0)
         if self.adj is None or not self.cached:
             self.adj = buildAdj(edge_index, edge_weight, N, self.aggr)
 
-        # apply tanh just like the repo does
+        # apply tanh for stability, as in the original repo
         alphas = [self.basealpha * torch.tanh(a) for a in self.alphas]
 
-        # build P₀x, P₁x, …, P_Kx
+        # compute P_0 x, P_1 x, ..., P_K x
         xs = [x]
         for L in range(1, self.K+1):
             xs.append(JacobiConv(L, xs, self.adj, alphas, self.a, self.b))
 
-        # cat and project
-        x_cat = torch.cat(xs, dim=1)  # shape [N, (K+1)*in_ch]
+        # concatenate and linear project
+        x_cat = torch.cat(xs, dim=1)
         return self.lin(x_cat)
