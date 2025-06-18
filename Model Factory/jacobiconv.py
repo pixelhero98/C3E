@@ -5,7 +5,6 @@ from torch import Tensor
 from torch_geometric.utils import degree
 from torch_sparse import SparseTensor
 
-
 def buildAdj(edge_index: Tensor,
              edge_weight: Tensor,
              n_node: int,
@@ -35,6 +34,7 @@ def buildAdj(edge_index: Tensor,
                        sparse_sizes=(n_node, n_node)).coalesce()
     return adj.cuda() if edge_index.is_cuda else adj
 
+
 def JacobiConv(L: int,
                xs: list[Tensor],
                adj: SparseTensor,
@@ -47,7 +47,7 @@ def JacobiConv(L: int,
     Implements exactly the repository’s JacobiConv recurrence:
       • L=0: identity
       • L=1: closed‐form with (l+r)/(r−l) and (r−l)
-      • L≥2: three‐term recurrence
+      • L≥2: three‐term recurrence (with proper [l,r] shift/scale)
     """
     if L == 0:
         return xs[0]
@@ -58,16 +58,25 @@ def JacobiConv(L: int,
         coef2 = (a + b + 2) / (r - l)
         return alphas[0] * (coef1 * xs[-1] + coef2 * Ax)
 
+    # Compute recurrence coefficients
     coef_l      = 2 * L * (L + a + b) * (2 * L - 2 + a + b)
     coef_lm1_1  = (2 * L + a + b - 1) * (2 * L + a + b) * (2 * L + a + b - 2)
     coef_lm1_2  = (2 * L + a + b - 1) * (a**2 - b**2)
     coef_lm2    = 2 * (L - 1 + a) * (L - 1 + b) * (2 * L + a + b)
 
-    t1 = alphas[L - 1] * (coef_lm1_1 / coef_l)
-    t2 = alphas[L - 1] * (coef_lm1_2 / coef_l)
-    t3 = alphas[L - 1] * alphas[L - 2] * (coef_lm2 / coef_l)
+    # Original tmp coefficients
+    tmp1 = alphas[L - 1] * (coef_lm1_1 / coef_l)
+    tmp2 = alphas[L - 1] * (coef_lm1_2 / coef_l)
+    tmp3 = alphas[L - 1] * alphas[L - 2] * (coef_lm2 / coef_l)
 
-    return t1 * Ax - t2 * xs[-1] - t3 * xs[-2]
+    # Apply [l, r] shift and scale
+    tmp1_2 = tmp1 * (2.0 / (r - l))
+    tmp2_2 = tmp1 * ((r + l) / (r - l)) + tmp2
+
+    # Three-term Jacobi recurrence
+    return tmp1_2 * Ax \
+         - tmp2_2 * xs[-1] \
+         - tmp3   * xs[-2]
 
 class JACOBIConv(nn.Module):
     """
