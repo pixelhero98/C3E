@@ -6,37 +6,39 @@ from torch_sparse import SparseTensor
 # Ensure your model and data live on the same device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def get_model_rep(model, data, p):
+def get_model_rep(model, data):
     """
     Run a forward pass and collect per-layer activations via hooks.
+    Collects outputs of each propagation (conv) and activation layer.
     All outputs are detached and moved to CPU immediately to avoid GPU memory bloat.
     """
     model = model.to(device)
     data = data.to(device)
-    ops = []
-
-    # Choose layers explicitly; skip the first mmp_layer since activation1 covers it
-    layers = [model.activation1] + model.mmp_layer[1:] + [model.postpro_layer[0]]
+    reps = []
     hooks = []
 
-    def make_hook(idx):
-        def hook(module, input, output):
-            ops.append(output.detach().cpu())
-        return hook
+    # Hook functions to capture outputs
+    def hook_conv(module, input, output):
+        reps.append(output.detach().cpu())
 
-    # Register hooks
-    for idx, layer in enumerate(layers):
-        hooks.append(layer.register_forward_hook(make_hook(idx)))
+    def hook_act(module, input, output):
+        reps.append(output.detach().cpu())
+
+    # Register hooks on propagation (conv) layers
+    for conv in model.propagation:
+        hooks.append(conv.register_forward_hook(hook_conv))
+    # Register hooks on activation layers
+    for act in model.activations:
+        hooks.append(act.register_forward_hook(hook_act))
 
     # Forward pass
     try:
-        model(data.x, data.edge_index, p)
+        model(data)
     finally:
-        # Clean up hooks
-        for hook in hooks:
-            hook.remove()
+        for h in hooks:
+            h.remove()
 
-    return ops
+    return reps
 
 
 def rep_entropy(rep, nbins: int = 100) -> float:
@@ -164,8 +166,16 @@ def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.
     load its state_dict from path, move it to the correct device,
     and set to evaluation mode.
 
-    Example:
-        model = load_model(MyGNN, "checkpoint.pth", in_channels, hidden_channels, out_channels)
+    Example for your Model class:
+        model = load_model(
+            Model,
+            "checkpoint.pth",
+            prop_layer=[in_dim, hidden1, ..., out_dim],
+            num_class=dataset.num_classes,
+            drop_probs=[0.5, 0.5, ...],
+            use_activations=[True, True, ...],
+            conv_methods=[...]
+        )
     """
     model = model_class(*model_args, **model_kwargs)
     state = torch.load(path, map_location=device)
@@ -175,6 +185,38 @@ def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.
     return model
 
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Additional Laplacian utilities
+# -----------------------------------------------------------------------------
+
+def compute_normalized_laplacian(edge_index, num_nodes: int) -> SparseTensor:
+    """
+    Build the symmetric normalized Laplacian:
+      L_sym = I - D^{-1/2} A D^{-1/2}
+    This differs from the unnormalized Laplacian L = D - A in that "mass"
+    from high-degree nodes is downweighted, yielding a spectrum in [0,2]
+    and better numerical stability for many spectral methods.
+    """
+    row, col = edge_index
+    N = num_nodes
+    # Adjacency
+    A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
+    # Degree diagonal
+    deg = A.sum(dim=1)
+    # Inverse sqrt degree
+    deg_inv_sqrt = deg.pow(-0.5)
+    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+    D_inv_sqrt = SparseTensor(
+        row=torch.arange(N, device=deg.device),
+        col=torch.arange(N, device=deg.device),
+        value=deg_inv_sqrt
+    )
+    # Identity
+    I = SparseTensor.eye(N, device=deg.device)
+    # Symmetric normalized Laplacian
+    L_sym = I - D_inv_sqrt.matmul(A).matmul(D_inv_sqrt)
+    return L_sym
+
 # -----------------------------------------------------------------------------
 # Usage example (in a separate script)
 # -----------------------------------------------------------------------------
