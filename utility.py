@@ -6,28 +6,31 @@ from torch_sparse import SparseTensor
 # Ensure your model and data live on the same device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
 def get_model_rep(model, data):
     """
-    Run a forward pass and collect per-layer activations via hooks.
-    Collects outputs of each propagation (conv) and activation layer.
-    All outputs are detached and moved to CPU immediately to avoid GPU memory bloat.
+    Run a forward pass and collect per-layer outputs separately for
+    propagation (conv) and activation layers.
+
+    Returns:
+        conv_reps: list of tensors from each conv layer (cpu, detached)
+        act_reps: list of tensors from each activation layer (cpu, detached)
     """
     model = model.to(device)
     data = data.to(device)
-    reps = []
+    conv_reps = []
+    act_reps = []
     hooks = []
 
-    # Hook functions to capture outputs
     def hook_conv(module, input, output):
-        reps.append(output.detach().cpu())
+        conv_reps.append(output.detach().cpu())
 
     def hook_act(module, input, output):
-        reps.append(output.detach().cpu())
+        act_reps.append(output.detach().cpu())
 
-    # Register hooks on propagation (conv) layers
+    # Register hooks
     for conv in model.propagation:
         hooks.append(conv.register_forward_hook(hook_conv))
-    # Register hooks on activation layers
     for act in model.activations:
         hooks.append(act.register_forward_hook(hook_act))
 
@@ -38,7 +41,7 @@ def get_model_rep(model, data):
         for h in hooks:
             h.remove()
 
-    return reps
+    return conv_reps, act_reps
 
 
 def rep_entropy(rep, nbins: int = 100) -> float:
@@ -51,29 +54,27 @@ def rep_entropy(rep, nbins: int = 100) -> float:
     rep_flat = rep.view(-1)
     p = F.softmax(rep_flat, dim=0)
 
-    # Define bin edges and assign each p to a bin
     edges = torch.linspace(0.0, 1.0, steps=nbins + 1, device=p.device)
     bin_idxs = torch.bucketize(p, edges, right=False) - 1
-
-    # Count frequencies
     counts = torch.bincount(bin_idxs, minlength=nbins).float()
     probs = counts / counts.sum()
 
-    # Numerical stability
     eps = 1e-12
     entropy = -(probs * torch.log(probs + eps)).sum().item()
     return entropy
 
 
-def show_layer_rep_entropy(ops, data, nbins: int = 100):
+def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     """
-    Print normalized entropy for input features and each collected layer.
+    Print entropy for input features and each conv and activation layer separately.
     """
     data = data.to(device)
+    entropies = {'input': rep_entropy(data.x, nbins)}
 
-    entropies = {0: rep_entropy(data.x, nbins)}
-    for idx, rep in enumerate(ops, start=1):
-        entropies[idx] = rep_entropy(rep, nbins)
+    for idx, rep in enumerate(conv_reps, start=1):
+        entropies[f'conv_{idx}'] = rep_entropy(rep, nbins)
+    for idx, rep in enumerate(act_reps, start=1):
+        entropies[f'act_{idx}'] = rep_entropy(rep, nbins)
 
     print(entropies)
     print('===============================================================')
@@ -81,78 +82,95 @@ def show_layer_rep_entropy(ops, data, nbins: int = 100):
 
 def compute_sparse_laplacian(edge_index, num_nodes: int) -> SparseTensor:
     """
-    Build the unnormalized graph Laplacian as a SparseTensor.
-    L = D - A
+    Build the unnormalized graph Laplacian as a SparseTensor: L = D - A
     """
     row, col = edge_index
     N = num_nodes
-    # Adjacency
     A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    # Degree diagonal
     deg = A.sum(dim=1)
-    D = SparseTensor(row=torch.arange(N, device=deg.device),
-                     col=torch.arange(N, device=deg.device),
-                     value=deg)
+    D = SparseTensor(
+        row=torch.arange(N, device=deg.device),
+        col=torch.arange(N, device=deg.device),
+        value=deg
+    )
     L = D - A
     return L
+
+
+def compute_normalized_laplacian(edge_index, num_nodes: int) -> SparseTensor:
+    """
+    Build the symmetric normalized Laplacian: L_sym = I - D^{-1/2} A D^{-1/2}
+    """
+    row, col = edge_index
+    N = num_nodes
+    A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
+    deg = A.sum(dim=1)
+    deg_inv_sqrt = deg.pow(-0.5)
+    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+    D_inv_sqrt = SparseTensor(
+        row=torch.arange(N, device=deg.device),
+        col=torch.arange(N, device=deg.device),
+        value=deg_inv_sqrt
+    )
+    I = SparseTensor.eye(N, device=deg.device)
+    L_sym = I - D_inv_sqrt.matmul(A).matmul(D_inv_sqrt)
+    return L_sym
 
 
 def compute_dirichlet_energy(node_features: torch.Tensor, L: SparseTensor) -> float:
     """
     Compute Dirichlet energy: trace(X^T L X).
-    Works with sparse Laplacian.
+    Works with both sparse and dense Laplacians.
     """
     X = node_features.to(device)
-    # LX = L * X
-    LX = L.matmul(X)
+    LX = L.matmul(X) if hasattr(L, 'matmul') else L @ X
     energy = torch.trace(X.t() @ LX)
     return energy.item()
 
 
-def show_layer_dirichlet_energy(ops, data):
+def show_layer_dirichlet_energy(conv_reps, act_reps, data):
     """
-    Print normalized Dirichlet energy for input and each representation.
+    Print normalized Dirichlet energy for input, conv, and activation layers.
     """
     data = data.to(device)
     L = compute_sparse_laplacian(data.edge_index, data.x.size(0))
 
-    # Baseline energy of input
     base_energy = compute_dirichlet_energy(data.x, L)
-    energies = {0: 1.0}
-
-    for idx, rep in enumerate(ops, start=1):
-        energies[idx] = compute_dirichlet_energy(rep, L) / base_energy
+    energies = {'input': 1.0}
+    for idx, rep in enumerate(conv_reps, start=1):
+        energies[f'conv_{idx}'] = compute_dirichlet_energy(rep, L) / base_energy
+    for idx, rep in enumerate(act_reps, start=1):
+        energies[f'act_{idx}'] = compute_dirichlet_energy(rep, L) / base_energy
 
     print(energies)
     print('===============================================================')
 
-# Statistics: mean & variance per dimension
+
 def vector_mean(rep: torch.Tensor) -> torch.Tensor:
     """Mean over the node dimension."""
     return rep.mean(dim=0)
+
 
 def vector_variance(rep: torch.Tensor) -> torch.Tensor:
     """Variance (unbiased) over the node dimension."""
     return rep.var(dim=0, unbiased=True)
 
-# Aggregations
-def mean_activation_per_layer(ops):
+
+def mean_activation_per_layer(reps):
     """
-    Compute the global mean activation per layer (flattened).
+    Compute the global mean activation per list of representations.
     """
-    return [rep.mean().item() for rep in ops]
+    return [rep.mean().item() for rep in reps]
 
 
-def mean_node_activation_per_layer(ops):
+def mean_node_activation_per_layer(reps):
     """
-    Compute per-layer mean activation averaged over nodes (vector of size = hidden_dim).
+    Compute per-layer mean activation averaged over nodes (vector per layer).
     """
-    return [vector_mean(rep).cpu() for rep in ops]
+    return [vector_mean(rep).cpu() for rep in reps]
 
-# -----------------------------------------------------------------------------
+
 # Model persistence utilities
-# -----------------------------------------------------------------------------
-
 def save_model(model: torch.nn.Module, path: str):
     """
     Save the model's state_dict to the given file path.
@@ -184,71 +202,33 @@ def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.
     model.eval()
     return model
 
-# -----------------------------------------------------------------------------
-# -----------------------------------------------------------------------------
-# Additional Laplacian utilities
-# -----------------------------------------------------------------------------
 
-def compute_normalized_laplacian(edge_index, num_nodes: int) -> SparseTensor:
-    """
-    Build the symmetric normalized Laplacian:
-      L_sym = I - D^{-1/2} A D^{-1/2}
-    This differs from the unnormalized Laplacian L = D - A in that "mass"
-    from high-degree nodes is downweighted, yielding a spectrum in [0,2]
-    and better numerical stability for many spectral methods.
-    """
-    row, col = edge_index
-    N = num_nodes
-    # Adjacency
-    A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    # Degree diagonal
-    deg = A.sum(dim=1)
-    # Inverse sqrt degree
-    deg_inv_sqrt = deg.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-    D_inv_sqrt = SparseTensor(
-        row=torch.arange(N, device=deg.device),
-        col=torch.arange(N, device=deg.device),
-        value=deg_inv_sqrt
-    )
-    # Identity
-    I = SparseTensor.eye(N, device=deg.device)
-    # Symmetric normalized Laplacian
-    L_sym = I - D_inv_sqrt.matmul(A).matmul(D_inv_sqrt)
-    return L_sym
-
-# -----------------------------------------------------------------------------
-# Usage example (in a separate script)
-# -----------------------------------------------------------------------------
-# Example showing how to save, reload with `p`, and compute metrics
-#
+# Usage example (in a separate script):
 # from improved_graph_metrics import (
 #     save_model, load_model,
 #     get_model_rep, show_layer_rep_entropy, show_layer_dirichlet_energy
 # )
-# from my_model import MyGNNModel
+# from my_model import Model
 # from torch_geometric.datasets import Planetoid
 #
 # # Load data
-# dataset = Planetoid("/data/Cora", "Cora")  # dataset[0]
+# dataset = Planetoid("/data/Cora", "Cora")
 # data = dataset[0]
 #
-# # After training, save the model state:
-# #   save_model(trained_model, "checkpoint.pth")
-#
-# # Later: reload the model (including `p` if model __init__ requires it)
+# # Reload model (with constructor params matching training)
 # model = load_model(
-#     MyGNNModel,             # model class
-#     "checkpoint.pth",      # saved state file
-#     in_channels=dataset.num_node_features,
-#     hidden_channels=64,
-#     out_channels=dataset.num_classes,
-#     p=0.5                   # pass `p` into constructor if needed
+#     Model,
+#     "checkpoint.pth",
+#     prop_layer=[data.num_node_features, 64, 64],
+#     num_class=dataset.num_classes,
+#     drop_probs=[0.5, 0.5],
+#     use_activations=[True, True],
+#     conv_methods=['gcn', 'gcn']
 # )
 #
-# # Collect activations; forward still takes `p`
-# reps = get_model_rep(model, data, p=0.5)
+# # Collect representations separately
+# conv_reps, act_reps = get_model_rep(model, data)
 #
 # # Compute and display metrics
-# show_layer_rep_entropy(reps, data)
-# show_layer_dirichlet_energy(reps, data)
+# show_layer_rep_entropy(conv_reps, act_reps, data)
+# show_layer_dirichlet_energy(conv_reps, act_reps, data)
