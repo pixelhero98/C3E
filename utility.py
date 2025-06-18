@@ -223,7 +223,7 @@ def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.
 #     num_class=dataset.num_classes,
 #     drop_probs=[0.5, 0.5],
 #     use_activations=[True, True],
-#     conv_methods=['gcn', 'gcn']
+#     conv_methods=['gcn']
 # )
 #
 # # Collect representations separately
