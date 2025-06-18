@@ -133,4 +133,3 @@ class APPNPConv(MessagePassing):
                 f'in_channels={self.in_channels}, '  \
                 f'out_channels={self.out_channels}, '  \
                 f'K={self.K}, alpha={self.alpha})')
-
