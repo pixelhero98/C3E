@@ -58,27 +58,27 @@ class Model(nn.Module):
             # Other propagation methods that require more initialization parameters.
             if key == 'jacobi':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], K=3, aggr='gcn', a=1.0, b=1.0, cached=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=3, aggr='gcn', a=1.0, b=1.0)
                 )
             elif key == 'gprgnn':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1, Init='PPR', Gamma=None, bias=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1)
                 )
             elif key == 'chebnetii':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], K=1, lambda_max=2.0, cached=True, bias=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=1, lambda_max=2.0)
                 )
             elif key == 'appnp':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1, dropout=0， cached=False, add_self_loops=True, normalize=True, bias=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=10, alpha=0.1)
                 )
             elif key == 'sgc':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], K=1, cached=False, add_self_loops=True, bias=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], K=1)
                 )
             elif key == 's2gc':
                 self.propagation.append(
-                    Conv(prop_layer[i], prop_layer[i + 1], alpha=0.1, K=1, cached=False, add_self_loops=True, bias=True)
+                    Conv(prop_layer[i], prop_layer[i + 1], alpha=0.1, K=1)
                 )
             # Propagation methods require only input and output dimensions.
             else:
