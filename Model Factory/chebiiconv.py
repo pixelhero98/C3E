@@ -5,6 +5,7 @@ from torch.nn import Parameter, Linear
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import get_laplacian
 
+
 class ChebIIConv(MessagePassing):
     """
     ChebNetII convolution layer from
