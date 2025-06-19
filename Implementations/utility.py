@@ -7,27 +7,63 @@ from torch_sparse import SparseTensor
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def train(model, data, optimizer):
+    """
+    Perform one training step on the full graph.
+
+    Args:
+        model: torch.nn.Module
+        data: PyG data object with x, edge_index, train_mask, y
+        optimizer: torch optimizer
+
+    Returns:
+        float: training loss
+    """
+    model.train()
     optimizer.zero_grad()
     out = model(data.x, data.edge_index)
     loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
     loss.backward()
     optimizer.step()
-
     return loss.item()
 
 def val(model, data):
-    pred = model(data.x, data.edge_index, p).argmax(dim=1)
-    correct = int((pred[data.val_mask] == data.y[data.val_mask]).sum())
-    num_nodes_validation = int(data.val_mask.sum())
+    """
+    Compute validation accuracy.
 
-    return correct / num_nodes_validation
+    Args:
+        model: torch.nn.Module
+        data: PyG data object with x, edge_index, val_mask, y
+
+    Returns:
+        float: validation accuracy
+    """
+    model.eval()
+    with torch.no_grad():
+        out = model(data.x, data.edge_index)
+        pred = out.argmax(dim=1)
+        correct = int((pred[data.val_mask] == data.y[data.val_mask]).sum())
+        total = int(data.val_mask.sum())
+    return correct / total
+
 
 def test(model, data):
-    pred = model(data.x, data.edge_index, p).argmax(dim=-1)
-    correct = int((pred[data.test_mask] == data.y[data.test_mask]).sum())
-    num_nodes_test = int(data.test_mask.sum())
+    """
+    Compute test accuracy.
 
-    return correct / num_nodes_test
+    Args:
+        model: torch.nn.Module
+        data: PyG data object with x, edge_index, test_mask, y
+
+    Returns:
+        float: test accuracy
+    """
+    model.eval()
+    with torch.no_grad():
+        out = model(data.x, data.edge_index)
+        pred = out.argmax(dim=1)
+        correct = int((pred[data.test_mask] == data.y[data.test_mask]).sum())
+        total = int(data.test_mask.sum())
+    return correct / total
     
 def get_model_rep(model, data):
     """
