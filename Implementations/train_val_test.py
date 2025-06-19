@@ -34,7 +34,7 @@ from tqdm import tqdm
 from Model_factory.model import Model
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
-from utility import train, val, test, save_model
+from utility import train, val, test
 
 def set_seed(seed: int):
     """
