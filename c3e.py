@@ -40,11 +40,14 @@ class ChanCapConEst:
 
     def regularized_feature_dim(self) -> float:
         """
-        Regularize feature dimension based on average node degree.
+        Regularize feature dimension to enable controlled and stable solutions.
         """
         if self.M <= 0:
             raise ValueError("The number of features (M) must be > 0.")
-        return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
+        elif self.sigma_s is not None:
+            return self.M * (1 / self.sigma_s * n) ** (self.sigma_s * n))
+        else:
+            return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
 
     def objective(self, w: np.ndarray) -> float:
         """
