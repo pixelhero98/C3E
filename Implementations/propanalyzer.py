@@ -146,7 +146,7 @@ class PropagationVarianceAnalyzer:
         S += M @ M_power
         return csr_matrix(S)
 
-        def _prop_gdc(self) -> csr_matrix:
+    def _prop_gdc(self) -> csr_matrix:
         N = self.A.shape[0]
         # diffusion kwargs
         if self.gdc_method == 'heat':
