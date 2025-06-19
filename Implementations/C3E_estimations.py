@@ -66,6 +66,7 @@ for sol in solutions:
             epochs_no_improve += 1
         if test_acc > best_test:
             best_test = test_acc
+            # save model for visualizing entropy transitions
             save_model(
                 model, 
                 os.path.join(SAVE_DIR, f'model_sol_{prop_layer_sizes}_ep{epoch}.pt')
