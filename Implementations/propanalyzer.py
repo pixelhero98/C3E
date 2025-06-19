@@ -149,7 +149,7 @@ class PropagationVarianceAnalyzer:
         S += M @ M_power
         return csr_matrix(S)
 
-    def _prop_gdc(self) -> csr_matrix:
+        def _prop_gdc(self) -> csr_matrix:
         N = self.A.shape[0]
         # diffusion kwargs
         if self.gdc_method == 'heat':
@@ -157,31 +157,23 @@ class PropagationVarianceAnalyzer:
                 'method': 'heat',
                 't': self.heat_t
             }
-        else:    
+        else:
             diff_kwargs = {
                 'method': 'ppr',
                 'alpha': self.alpha,
             }
         # sparsification kwargs
         if self.gdc_spars_method == 'topk':
-            spars_kwargs = {'method': 'topk', 'k': self.gdc_avg_degree, 'dim': 1}
+            spars_kwargs = {'method': 'topk', 'k': self.gdc_avg_degree, 'dim': 0}
         else:
-            spars_kwargs = {'method': 'threshold'}
-            if self.gdc_threshold_eps is not None:
-                spars_kwargs['eps'] = self.gdc_threshold_eps
-            else:
-                spars_kwargs['avg_degree'] = self.gdc_avg_degree
-
-        # force exact for topk
-        effective_exact = self.gdc_exact or (self.gdc_spars_method == 'topk')
+            spars_kwargs = {'method': 'threshold', 'eps': self.gdc_threshold_eps}
 
         transform = GDC(
             self_loop_weight=1.0,
             normalization_in='sym',
             normalization_out='col',
             diffusion_kwargs=diff_kwargs,
-            sparsification_kwargs=spars_kwargs,
-            exact=effective_exact,
+            sparsification_kwargs=spars_kwargs
         )
         data_gdc = transform(self.data)
         return to_scipy_sparse_matrix(
