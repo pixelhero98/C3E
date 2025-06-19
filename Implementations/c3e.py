@@ -86,11 +86,15 @@ class ChanCapConEst:
         H: float,
         verbose: bool = False,
         max_layers: int = 100
-    ) -> dict:
+    ) -> list:
         """
         Estimate layer widths under lower bound constraint H, up to max_layers.
-        Returns dict with L, weights, entropy, constraint_value.
+        Returns a list where the first element is the list of rounded hidden dimensions
+        for each L, and the second element is the list of dropout probabilities for each L.
         """
+        all_rounded = []
+        all_dropouts = []
+
         for L in range(2, max_layers + 1):
             w0 = np.full(L, 2.0)
             upper = (self.N - 1) * self.M
@@ -114,24 +118,25 @@ class ChanCapConEst:
             constraint_val = self.constraint(weights, H)
             entropy = -self.objective(weights)
 
+            # compute rounded hidden dimensions and dropout probabilities
+            rounded_weights = [int(round(wi)) for wi in weights]
+            dropout_probs = self.dropouts(weights.tolist())
+
+            all_rounded.append(rounded_weights)
+            all_dropouts.append(dropout_probs)
+
             if verbose:
-                layers_list = weights.tolist()
                 print("\n=== Estimation Summary ===")
                 print(f"Depth                : {L}")
-                print(f"Hidden dimensions    : {layers_list}")
-                rounded_weights = [int(round(wi)) for wi in weights]
+                print(f"Hidden dimensions    : {weights.tolist()}")
                 print(f"Rounded hidden dims  : {rounded_weights}")
                 print(f"Network channel capacity: {entropy:.4f}")
                 print(f"Lower bound          : {constraint_val + H:.4f} in [{H:.4f}, {(H / self.eta):.4f}]")
-                print(f"Dropout probabilities: {self.dropouts(layers_list)}")
-                print(f"Rep. compression     : {self.rep_compression_ratio(layers_list, entropy):.4f}")
+                print(f"Dropout probabilities: {dropout_probs}")
+                print(f"Rep. compression     : {self.rep_compression_ratio(weights.tolist(), entropy):.4f}")
 
+            # return all results up to the first L that meets the constraint
             if constraint_val + H > H / self.eta:
-                return {
-                    'L': L,
-                    'weights': weights,
-                    'entropy': entropy,
-                    'constraint_value': constraint_val
-                }
+                return [all_rounded, all_dropouts]
 
         raise RuntimeError(f"Failed to meet lower bound constraint H={H} within {max_layers} layers.")
