@@ -12,7 +12,7 @@ H, data, num_classes, eta = np.log(dataset[0].x.shape[0]), dataset[0], dataset.n
 
 prop_method = 'gcn'
 sigma_s = PropagationVarianceAnalyzer(data, method=prop_method)
-Estimator = ChanCapConEst(data, 0.5, sigma_s)
+Estimator = ChanCapConEst(data, eta, sigma_s)
 solutions = Estimator.optimize_weights(H, True)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
