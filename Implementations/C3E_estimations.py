@@ -17,8 +17,8 @@ torch.manual_seed(SEED)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
 
-DATA_ROOT = '/home/.../data'
-SAVE_DIR = '/home/.../saved'
+DATA_ROOT = '/home/data'
+SAVE_DIR = '/home/saved'
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 dname = 'Cora'
