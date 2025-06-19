@@ -2,6 +2,12 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.utils import get_laplacian
 from torch_sparse import SparseTensor
+import logging
+from pathlib import Path
+from torch import nn, optim
+from torch.optim import lr_scheduler
+from typing import Sequence
+
 
 # Ensure your model and data live on the same device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -229,11 +235,43 @@ def mean_node_activation_per_layer(reps):
 
 
 # Model persistence utilities
-def save_model(model: torch.nn.Module, path: str):
+def save_checkpoint(
+    sol_dir: Path,
+    layer_str: str,
+    epoch: int,
+    model: nn.Module,
+    optimizer: optim.Optimizer,
+    scheduler: lr_scheduler._LRScheduler,
+    best_val: float,
+    layer_sizes: Sequence[int],
+    dropout: float,
+) -> None:
     """
-    Save the model's state_dict to the given file path.
+    Save training state to disk.
+
+    Args:
+        sol_dir: Directory to save checkpoints into.
+        layer_str: A string identifier for the architecture (e.g. "64-32-16").
+        epoch: Current epoch number.
+        model: The model being trained.
+        optimizer: The optimizer.
+        scheduler: Learning-rate scheduler.
+        best_val: Best validation accuracy so far.
+        layer_sizes: Sizes of each hidden layer.
+        dropout: Dropout probability.
     """
-    torch.save(model.state_dict(), path)
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'best_val_acc': best_val,
+        'layer_sizes': layer_sizes,
+        'dropout': dropout,
+    }
+    ckpt_path = sol_dir / f"best_val_{layer_str}_ep{epoch}.pt"
+    torch.save(checkpoint, ckpt_path)
+    logging.info(f"Saved checkpoint: {ckpt_path}")
 
 
 def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.Module:
