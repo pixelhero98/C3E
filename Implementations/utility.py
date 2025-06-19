@@ -197,7 +197,7 @@ def show_layer_dirichlet_energy(conv_reps, act_reps, data):
     Print normalized Dirichlet energy for input, conv, and activation layers.
     """
     data = data.to(device)
-    L = compute_sparse_laplacian(data.edge_index, data.x.size(0))
+    L = compute_sparse_laplacian(data.edge_index, data.x.size(0)) # compute_normalized_laplacian(data.edge_index, data.x.size(0))
 
     base_energy = compute_dirichlet_energy(data.x, L)
     energies = {'input': 1.0}
@@ -292,8 +292,8 @@ def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.
         )
     """
     model = model_class(*model_args, **model_kwargs)
-    state = torch.load(path, map_location=device)
-    model.load_state_dict(state)
+    checkpoint = torch.load(path, map_location=device)            # ← load full checkpoint dict
+    model.load_state_dict(checkpoint['model_state_dict'])        # ← extract only the weights
     model.to(device)
     model.eval()
     return model
