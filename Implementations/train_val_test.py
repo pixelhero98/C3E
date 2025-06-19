@@ -20,7 +20,6 @@ Example Usage:
     python train_gcn.py --save-dir ./models
 """
 
-import os
 import random
 import argparse
 from pathlib import Path
@@ -36,7 +35,7 @@ from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
 from utility import train, val, test, save_checkpoint
 
-def set_seed(seed: int):
+def set_seed(seed: int) -> None:
     """
     Set random seeds for reproducibility.
     """
@@ -49,34 +48,43 @@ def set_seed(seed: int):
     cudnn.benchmark = False
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     """
     Parse command-line arguments.
     """
     parser = argparse.ArgumentParser(
         description="Train GCN on Planetoid dataset with capacity estimation."
     )
-    parser.add_argument('--data-root', type=Path, default=Path.home() / 'data', help='Root directory for datasets')
-    parser.add_argument('--save-dir', type=Path, default=Path.home() / 'saved', help='Directory to save models and logs')
-    parser.add_argument('--dataset', type=str, default='Cora', choices=['Cora', 'CiteSeer', 'PubMed'], help='Planetoid dataset name')
-    parser.add_argument('--epochs', type=int, default=500, help='Maximum number of training epochs')
-    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate')
-    parser.add_argument('--weight-decay', type=float, default=5e-4, help='Weight decay (L2 regularization)')
-    parser.add_argument('--eta', type=float, default=0.5, help='Eta parameter for capacity estimator')
-    parser.add_argument('--patience', type=int, default=75, help='Early stopping patience (in epochs)')
-    parser.add_argument('--prop-method', type=str, default='gcn', choices=['gcn', 'appnp', 'gdc', 'sgc',
-    'chebnetii', 'gprgnn', 'jacobiconv', 's2gc'], help='Propagation method')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--data-root', type=Path, default=Path.home() / 'data',
+                        help='Root directory for datasets')
+    parser.add_argument('--save-dir', type=Path, default=Path.home() / 'saved',
+                        help='Directory to save models and logs')
+    parser.add_argument('--dataset', type=str, default='Cora',
+                        choices=['Cora', 'CiteSeer', 'PubMed'],
+                        help='Planetoid dataset name')
+    parser.add_argument('--epochs', type=int, default=500,
+                        help='Maximum number of training epochs')
+    parser.add_argument('--lr', type=float, default=2e-4,
+                        help='Learning rate')
+    parser.add_argument('--weight-decay', type=float, default=5e-4,
+                        help='Weight decay (L2 regularization)')
+    parser.add_argument('--eta', type=float, default=0.5,
+                        help='Eta parameter for capacity estimator')
+    parser.add_argument('--patience', type=int, default=75,
+                        help='Early stopping patience (in epochs)')
+    parser.add_argument('--prop-method', type=str, default='gcn',
+                        choices=['gcn', 'appnp', 'gdc', 'sgc',
+                                 'chebnetii', 'gprgnn', 'jacobiconv', 's2gc'],
+                        help='Propagation method')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed')
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-
-    # Setup logging
-    args.save_dir.mkdir(parents=True, exist_ok=True)
+def setup_logging(save_dir: Path) -> None:
+    save_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
-        filename=args.save_dir / 'training.log',
+        filename=save_dir / 'training.log',
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
@@ -86,71 +94,62 @@ def main():
     console.setFormatter(formatter)
     logging.getLogger().addHandler(console)
 
-    logging.info(f"Arguments: {args}")
 
-    # Reproducibility
-    set_seed(args.seed)
+def run_solution(data, dataset, layers: list, dropout, args, device) -> None:
+    prop_layer_sizes = layers
+    # Ensure dropout list matches number of layers
+    if isinstance(dropout, float):
+        drop_probs = [dropout] * len(prop_layer_sizes)
+    else:
+        drop_probs = list(dropout)
 
-    # Load dataset
-    dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
-    data = dataset[0]
-    num_nodes = data.x.size(0)
-    H = np.log(num_nodes)
+    layer_str = '_'.join(map(str, prop_layer_sizes))
+    sol_dir = args.save_dir / f"sol_{layer_str}"
+    sol_dir.mkdir(exist_ok=True)
 
-    # Estimate architectures
-    sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method)
-    estimator = ChanCapConEst(data, args.eta, sigma_s)
-    solutions = estimator.optimize_weights(H, verbose=True)
+    model = Model(
+        prop_layer=[data.x.shape[1]] + prop_layer_sizes,
+        num_class=dataset.num_classes,
+        drop_probs=drop_probs,
+        use_activations=[True] * len(prop_layer_sizes),
+        conv_methods=args.prop_method
+    ).to(device)
 
-    # Move data to device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    data = data.to(device)
-    
-    # Training loop over estimated solutions
-    for layers, dropout in zip(solutions[0], solutions[1]):
-        prop_layer_sizes = layers
-        layer_str = '_'.join(map(str, prop_layer_sizes))
-        sol_dir = args.save_dir / f"sol_{layer_str}"
-        sol_dir.mkdir(exist_ok=True)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', patience=20, verbose=True
+    )
 
-        model = Model(
-            prop_layer=[data.x.shape[1]] + prop_layer_sizes,
-            num_class=dataset.num_classes,
-            drop_probs=dropout,
-            use_activations=[True] * len(prop_layer_sizes),
-            conv_methods=args.prop_method
-        ).to(device)
+    best_val = 0.0
+    epochs_no_improve = 0
+    logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={drop_probs}")
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20)
-
-        best_val = 0.0
-        epochs_no_improve = 0
-
-        logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={dropout}")
+    try:
         for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {layer_str}"):
-            # Training step (handles model.train())
             loss = train(model, data, optimizer)
-
-            # Validation (handles model.eval() and no_grad)
             val_acc = val(model, data)
-
-            # Scheduler step
             scheduler.step(val_acc)
 
-            # Early stopping and checkpointing
+            # Logging with learning rate
+            current_lr = optimizer.param_groups[0]['lr']
+            if epoch % 10 == 0 or epoch == 1:
+                logging.info(f"Epoch {epoch}/{args.epochs} - loss: {loss:.4f}, val_acc: {val_acc:.4f}, lr: {current_lr:.2e}")
+
+            # Early stopping & checkpointing
             if val_acc > best_val:
                 best_val = val_acc
                 epochs_no_improve = 0
-                save_checkpoint(sol_dir=sol_dir,
-                                layer_str=layer_str,
-                                epoch=epoch,
-                                model=model,
-                                optimizer=optimizer,
-                                scheduler=scheduler,
-                                best_val=best_val,
-                                layer_sizes=prop_layer_sizes,
-                                dropout=dropout)
+                save_checkpoint(
+                    sol_dir=sol_dir,
+                    layer_str=layer_str,
+                    epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    best_val=best_val,
+                    layer_sizes=prop_layer_sizes,
+                    dropout=drop_probs
+                )
             else:
                 epochs_no_improve += 1
 
@@ -158,13 +157,40 @@ def main():
                 logging.info(f"No improvement for {args.patience} epochs. Early stopping.")
                 break
 
-            if epoch % 10 == 0 or epoch == 1:
-                logging.info(f"Epoch {epoch}/{args.epochs} - loss: {loss:.4f}, val_acc: {val_acc:.4f}")
-
-        # Final test evaluation (handles eval and no_grad)
         test_acc = test(model, data)
         logging.info(f"Solution {prop_layer_sizes}: best_val={best_val:.4f}, test_acc={test_acc:.4f}")
 
+    except Exception as e:
+        logging.error(f"Error in solution {layer_str}: {e}", exc_info=True)
+
+    finally:
+        # Clean up to free GPU memory
+        del model, optimizer, scheduler
+        torch.cuda.empty_cache()
+
+
+def main() -> None:
+    args = parse_args()
+    setup_logging(args.save_dir)
+    logging.info(f"Arguments: {args}")
+
+    set_seed(args.seed)
+
+    dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+    data = dataset[0]
+    num_nodes = data.x.size(0)
+    H = np.log(num_nodes)
+
+    sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method)
+    estimator = ChanCapConEst(data, args.eta, sigma_s)
+    solutions = estimator.optimize_weights(H, verbose=True)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    data = data.to(device)
+
+    # Iterate solutions safely
+    for layers, dropout in zip(solutions[0], solutions[1]):
+        run_solution(data, dataset, layers, dropout, args, device)
 
 if __name__ == '__main__':
     main()
