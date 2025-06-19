@@ -6,7 +6,29 @@ from torch_sparse import SparseTensor
 # Ensure your model and data live on the same device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+def train(model, data, optimizer):
+    optimizer.zero_grad()
+    out = model(data.x, data.edge_index)
+    loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
+    loss.backward()
+    optimizer.step()
 
+    return loss.item()
+
+def val(model, data):
+    pred = model(data.x, data.edge_index, p).argmax(dim=1)
+    correct = int((pred[data.val_mask] == data.y[data.val_mask]).sum())
+    num_nodes_validation = int(data.val_mask.sum())
+
+    return correct / num_nodes_validation
+
+def test(model, data):
+    pred = model(data.x, data.edge_index, p).argmax(dim=-1)
+    correct = int((pred[data.test_mask] == data.y[data.test_mask]).sum())
+    num_nodes_test = int(data.test_mask.sum())
+
+    return correct / num_nodes_test
+    
 def get_model_rep(model, data):
     """
     Run a forward pass and collect per-layer outputs separately for
