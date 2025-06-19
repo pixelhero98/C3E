@@ -104,9 +104,9 @@ def main():
     # Move data to device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data = data.to(device)
-
+    
     # Training loop over estimated solutions
-    for layers, *_, dropout in solutions:
+    for layers, dropout in zip(solutions[0], solutions[1]):
         prop_layer_sizes = layers
         layer_str = '_'.join(map(str, prop_layer_sizes))
         sol_dir = args.save_dir / f"sol_{layer_str}"
