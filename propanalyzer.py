@@ -20,12 +20,18 @@ def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
 class PropagationVarianceAnalyzer:
     """
     Computes variance of the propagation matrix for various GNN-style
-    propagation schemes. Supports: 'gcn', 'appnp', 'gdc', 'sgc',
+    propagation schemes. Supported methods: 'gcn', 'appnp', 'gdc', 'sgc',
     'chebnetii', 'gprgnn', 'jacobiconv', 's2gc', or 'all'.
 
-    GDC (diffusion) options:
-      - diffusion via 'ppr' or 'heat'
-      - sparsification via 'topk' or 'threshold'
+    Default hyperparameters align with the original works:
+      • GCN:    symmetric normalization with self-loops
+      • APPNP:  K=10, α=0.1
+      • GDC:    PPR α=0.05, sparsify top-k with avg_degree=64
+      • SGC:    K=2
+      • ChebNet II: K=10
+      • GPRGNN: K=10, uniform θ
+      • JacobiConv: T=10 iterations, α=0.5
+      • S2GC:   K=1, α=0.5
     """
     SUPPORTED = {
         'gcn', 'appnp', 'gdc', 'sgc',
@@ -37,15 +43,21 @@ class PropagationVarianceAnalyzer:
         self,
         data,
         method: str = 'all',
-        # general diffusion teleport prob
-        alpha: float = 0.05,
-        # APPNP params
+        # APPNP
         appnp_k: int = 10,
         appnp_alpha: float = 0.1,
+        # GDC diffusion (PPR)
+        alpha: float = 0.05,
+        gdc_diffusion_eps: float = 1e-4,
+        # GDC sparsification
+        gdc_spars_method: str = 'topk',
+        gdc_avg_degree: int = 64,
+        gdc_threshold_eps: float = None,
+        gdc_exact: bool = False,
         # SGC
         sgc_k: int = 2,
-        # ChebNetII
-        cheb_k: int = 5,
+        # ChebNet II
+        cheb_k: int = 10,
         cheb_theta: np.ndarray = None,
         # GPRGNN
         gpr_k: int = 10,
@@ -56,15 +68,8 @@ class PropagationVarianceAnalyzer:
         # S2GC
         s2gc_k: int = 1,
         s2gc_alpha: float = 0.5,
-        # GDC diffusion
-        gdc_method: str = 'ppr',           # 'ppr' or 'heat'
+        # heat-kernel for GDC
         heat_t: float = 1.0,
-        gdc_diffusion_eps: float = 1e-4,   # for approximate PPR
-        # GDC sparsification
-        gdc_spars_method: str = 'topk',    # 'topk' or 'threshold'
-        gdc_avg_degree: int = 64,
-        gdc_threshold_eps: float = None,
-        gdc_exact: bool = False            # override to force exact
     ):
         self.method = method.lower()
         if self.method not in self.SUPPORTED:
@@ -84,46 +89,41 @@ class PropagationVarianceAnalyzer:
             raise TypeError("`data` must be a PyG Data or scipy.sparse.csr_matrix")
         self.data = data
 
-        # Store common params
-        self.alpha        = alpha
-        self.appnp_k      = appnp_k
-        self.appnp_alpha  = appnp_alpha
-        self.sgc_k        = sgc_k
-        self.cheb_k       = cheb_k
-        self.cheb_theta   = (
+        # Store parameters
+        self.appnp_k         = appnp_k
+        self.appnp_alpha     = appnp_alpha
+        self.alpha           = alpha
+        self.gdc_diffusion_eps = gdc_diffusion_eps
+        self.gdc_spars_method = gdc_spars_method.lower()
+        self.gdc_avg_degree  = gdc_avg_degree
+        self.gdc_threshold_eps = gdc_threshold_eps
+        self.gdc_exact       = gdc_exact
+        self.sgc_k           = sgc_k
+        self.cheb_k          = cheb_k
+        self.cheb_theta      = (
             cheb_theta
             if cheb_theta is not None
             else np.ones(self.cheb_k + 1) / (self.cheb_k + 1)
         )
-        self.gpr_k        = gpr_k
-        self.gpr_theta    = (
+        self.gpr_k           = gpr_k
+        self.gpr_theta       = (
             gpr_theta
             if gpr_theta is not None
             else np.ones(self.gpr_k + 1) / (self.gpr_k + 1)
         )
-        self.jacobi_iters = jacobi_iters
-        self.jacobi_alpha = jacobi_alpha
-        self.s2gc_k       = s2gc_k
-        self.s2gc_alpha   = s2gc_alpha
+        self.jacobi_iters    = jacobi_iters
+        self.jacobi_alpha    = jacobi_alpha
+        self.s2gc_k          = s2gc_k
+        self.s2gc_alpha      = s2gc_alpha
+        self.heat_t          = heat_t
 
-        # GDC diffusion params
-        self.gdc_method           = gdc_method.lower()
-        if self.gdc_method not in {'ppr', 'heat'}:
-            raise ValueError("gdc_method must be 'ppr' or 'heat'")
-        self.heat_t               = heat_t
-        self.gdc_diffusion_eps    = gdc_diffusion_eps
-
-        # GDC sparsification params
-        self.gdc_spars_method     = gdc_spars_method.lower()
+        # Validate sparsification method
         if self.gdc_spars_method not in {'topk', 'threshold'}:
             raise ValueError("gdc_spars_method must be 'topk' or 'threshold'")
-        self.gdc_avg_degree       = gdc_avg_degree
-        self.gdc_threshold_eps    = gdc_threshold_eps
-        self.gdc_exact            = gdc_exact
+        # Validate diffusion method
+        self.gdc_method = 'ppr'  # always PPR here by default
 
     def _prop_gcn(self) -> csr_matrix:
-        if self.data is None:
-            raise ValueError("GCN requires PyG Data with edge_index")
         edge_index, edge_weight = gcn_norm(
             self.data.edge_index,
             getattr(self.data, 'edge_weight', None),
@@ -149,56 +149,35 @@ class PropagationVarianceAnalyzer:
         return csr_matrix(S)
 
     def _prop_gdc(self) -> csr_matrix:
-        if self.data is None:
-            raise ValueError("GDC requires PyG Data with edge_index")
-
         N = self.A.shape[0]
-
-        # diffusion kwargs (always include eps for PPR)
-        if self.gdc_method == 'ppr':
-            diffusion_kwargs = {
-                'method': 'ppr',
-                'alpha': self.alpha,
-                'eps': self.gdc_diffusion_eps,
-            }
-        else:  # heat
-            diffusion_kwargs = {
-                'method': 'heat',
-                't': self.heat_t,
-            }
-
+        # diffusion kwargs
+        diff_kwargs = {
+            'method': 'ppr',
+            'alpha': self.alpha,
+            'eps': self.gdc_diffusion_eps,
+        }
         # sparsification kwargs
         if self.gdc_spars_method == 'topk':
-            spars_kwargs = {
-                'method': 'topk',
-                'k': self.gdc_avg_degree,
-                'dim': 1,
-            }
-        else:  # threshold
-            spars_kwargs = {
-                **({'eps': self.gdc_threshold_eps}
-                   if self.gdc_threshold_eps is not None
-                   else {'avg_degree': self.gdc_avg_degree})
-            }
-            spars_kwargs['method'] = 'threshold'
+            spars_kwargs = {'method': 'topk', 'k': self.gdc_avg_degree, 'dim': 1}
+        else:
+            spars_kwargs = {'method': 'threshold'}
+            if self.gdc_threshold_eps is not None:
+                spars_kwargs['eps'] = self.gdc_threshold_eps
+            else:
+                spars_kwargs['avg_degree'] = self.gdc_avg_degree
 
-        # force exact for topk or heat if needed
-        effective_exact = (
-            self.gdc_exact
-            or self.gdc_spars_method == 'topk'
-            or diffusion_kwargs['method'] == 'heat'
-        )
+        # force exact for topk
+        effective_exact = self.gdc_exact or (self.gdc_spars_method == 'topk')
 
         transform = GDC(
             self_loop_weight=1.0,
             normalization_in='sym',
             normalization_out='col',
-            diffusion_kwargs=diffusion_kwargs,
+            diffusion_kwargs=diff_kwargs,
             sparsification_kwargs=spars_kwargs,
             exact=effective_exact,
         )
         data_gdc = transform(self.data)
-
         return to_scipy_sparse_matrix(
             data_gdc.edge_index,
             data_gdc.edge_attr,
@@ -270,13 +249,11 @@ class PropagationVarianceAnalyzer:
         row_sums[row_sums == 0] = 1
         inv_sqrt = 1.0 / np.sqrt(row_sums)
         norm_A = diags(inv_sqrt) @ A_hat @ diags(inv_sqrt)
-        alpha = self.s2gc_alpha
-        K = self.s2gc_k
-        S = alpha * identity(N, format='csr')
+        S = self.s2gc_alpha * identity(N, format='csr')
         M_power = identity(N, format='csr')
-        for _ in range(K):
+        for _ in range(self.s2gc_k):
             M_power = norm_A @ M_power
-            S += (1.0 - alpha) / K * M_power
+            S += (1.0 - self.s2gc_alpha) / self.s2gc_k * M_power
         return csr_matrix(S)
 
     def compute_variance(self, method: str = None) -> float:
@@ -285,8 +262,7 @@ class PropagationVarianceAnalyzer:
             raise ValueError("Use compute_all() to get all methods")
         if m not in self.SUPPORTED:
             raise ValueError(f"Unknown method '{m}'")
-        func = getattr(self, f"_prop_{m}")
-        S = func()
+        S = getattr(self, f"_prop_{m}")()
         return float(np.var(S.toarray().ravel()))
 
     def compute_all(self) -> dict:
