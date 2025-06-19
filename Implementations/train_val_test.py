@@ -34,7 +34,7 @@ from tqdm import tqdm
 from Model_factory.model import Model
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
-from utility import train, val, test
+from utility import train, val, test, save_checkpoint
 
 def set_seed(seed: int):
     """
@@ -142,19 +142,15 @@ def main():
             if val_acc > best_val:
                 best_val = val_acc
                 epochs_no_improve = 0
-
-                checkpoint = {
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict(),
-                    'best_val_acc': best_val,
-                    'layer_sizes': prop_layer_sizes,
-                    'dropout': dropout,
-                }
-                ckpt_path = sol_dir / f"best_val_{layer_str}_ep{epoch}.pt"
-                torch.save(checkpoint, ckpt_path)
-                logging.info(f"Saved checkpoint: {ckpt_path}")
+                save_checkpoint(sol_dir=sol_dir,
+                                layer_str=layer_str,
+                                epoch=epoch,
+                                model=model,
+                                optimizer=optimizer,
+                                scheduler=scheduler,
+                                best_val=best_val,
+                                layer_sizes=prop_layer_sizes,
+                                dropout=dropout)
             else:
                 epochs_no_improve += 1
 
