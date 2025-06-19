@@ -43,5 +43,8 @@ for sol in solutions:
         best_test_perf = test_perf
         best_test_epoch = epoch
         save_model(model, store)
-        
+
+    if epoch % 10 == 0:
+      print(f'Train Loss={loss}, Epoch={epoch}')
+    
   print(f'Current Solution={sol[0]}: Best Val Accuracy={best_val_perf}, Epoch={best_val_epoch}, Best Test Accuracy={best_test_perf}, Epoch={best_test_epoch}')
