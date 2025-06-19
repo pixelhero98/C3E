@@ -64,7 +64,8 @@ def parse_args():
     parser.add_argument('--weight-decay', type=float, default=5e-4, help='Weight decay (L2 regularization)')
     parser.add_argument('--eta', type=float, default=0.5, help='Eta parameter for capacity estimator')
     parser.add_argument('--patience', type=int, default=75, help='Early stopping patience (in epochs)')
-    parser.add_argument('--prop-method', type=str, default='gcn', choices=['gcn', 'sage', 'gin'], help='Propagation method')
+    parser.add_argument('--prop-method', type=str, default='gcn', choices=['gcn', 'appnp', 'gdc', 'sgc',
+    'chebnetii', 'gprgnn', 'jacobiconv', 's2gc'], help='Propagation method')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     return parser.parse_args()
 
