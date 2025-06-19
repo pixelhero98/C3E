@@ -1,7 +1,4 @@
-#!/usr/bin/env python
 """
-Train GCN on Planetoid datasets with capacity estimation.
-
 Example Usage:
     # Default settings (Cora dataset):
     python train_gcn.py
@@ -22,24 +19,22 @@ Example Usage:
     # Minimal example (only specify save directory):
     python train_gcn.py --save-dir ./models
 """
+
 import os
 import random
 import argparse
 from pathlib import Path
 import logging
-
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
 from torch_geometric.datasets import Planetoid
 from tqdm import tqdm
-
 from Model_factory.model import Model
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
 from utility import train, val, test, save_model
-
 
 def set_seed(seed: int):
     """
@@ -50,7 +45,6 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    # Ensure deterministic behavior in cuDNN
     cudnn.deterministic = True
     cudnn.benchmark = False
 
@@ -100,7 +94,7 @@ def main():
     dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
     data = dataset[0]
     num_nodes = data.x.size(0)
-    H = np.log(num_nodes)  # natural log of number of nodes
+    H = np.log(num_nodes)
 
     # Estimate architectures
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method)
@@ -134,21 +128,20 @@ def main():
 
         logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={dropout}")
         for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {layer_str}"):
-            model.train()
+            # Training step (handles model.train())
             loss = train(model, data, optimizer)
 
-            model.eval()
-            with torch.no_grad():
-                val_acc = val(model, data)
+            # Validation (handles model.eval() and no_grad)
+            val_acc = val(model, data)
 
+            # Scheduler step
             scheduler.step(val_acc)
 
-            # Early stopping on validation
+            # Early stopping and checkpointing
             if val_acc > best_val:
                 best_val = val_acc
                 epochs_no_improve = 0
 
-                # Save checkpoint
                 checkpoint = {
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
@@ -171,13 +164,8 @@ def main():
             if epoch % 10 == 0 or epoch == 1:
                 logging.info(f"Epoch {epoch}/{args.epochs} - loss: {loss:.4f}, val_acc: {val_acc:.4f}")
 
-        # Final test evaluation on best model
-        best_ckpt = max(sol_dir.glob(f"best_val_{layer_str}_ep*.pt"), key=os.path.getctime)
-        checkpoint = torch.load(best_ckpt, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
-        with torch.no_grad():
-            test_acc = test(model, data)
+        # Final test evaluation (handles eval and no_grad)
+        test_acc = test(model, data)
         logging.info(f"Solution {prop_layer_sizes}: best_val={best_val:.4f}, test_acc={test_acc:.4f}")
 
 
