@@ -259,34 +259,3 @@ def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.
     model.to(device)
     model.eval()
     return model
-
-
-# Usage example (in a separate script):
-# from improved_graph_metrics import (
-#     save_model, load_model,
-#     get_model_rep, show_layer_rep_entropy, show_layer_dirichlet_energy
-# )
-# from my_model import Model
-# from torch_geometric.datasets import Planetoid
-#
-# # Load data
-# dataset = Planetoid("/data/Cora", "Cora")
-# data = dataset[0]
-#
-# # Reload model (with constructor params matching training)
-# model = load_model(
-#     Model,
-#     "checkpoint.pth",
-#     prop_layer=[data.num_node_features, 64, 64],
-#     num_class=dataset.num_classes,
-#     drop_probs=[0.5, 0.5],
-#     use_activations=[True, True],
-#     conv_methods=['gcn']
-# )
-#
-# # Collect representations separately
-# conv_reps, act_reps = get_model_rep(model, data)
-#
-# # Compute and display metrics
-# show_layer_rep_entropy(conv_reps, act_reps, data)
-# show_layer_dirichlet_energy(conv_reps, act_reps, data)
