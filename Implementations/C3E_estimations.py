@@ -1,50 +1,80 @@
+import os
+import random
+import numpy as np
+import torch
 import torch_geometric.transforms as T
+from torch_geometric.datasets import Planetoid
 from Model_factory.model import Model
-from torch_geometric.datasets import Planetoid, Amazon, WikipediaNetwork
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
 from utility import train, val, test, save_model
 
+# === Config & seeding ===
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
 
-dname, root, store = 'Cora', '/home/PycharmProjects/pythonProject/data', '/home/PycharmProjects/pythonProject/saved'
-dataset = Planetoid(root, name=dname, transform=T.AddSelfLoops())
-H, data, num_classes, eta = np.log(dataset[0].x.shape[0]), dataset[0], dataset.num_classes, 0.5
+DATA_ROOT = '/home/.../data'
+SAVE_DIR = '/home/.../saved'
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-prop_method = 'gcn'
-sigma_s = PropagationVarianceAnalyzer(data, method=prop_method)
-Estimator = ChanCapConEst(data, eta, sigma_s)
-solutions = Estimator.optimize_weights(H, True)
+dname = 'Cora'
+dataset = Planetoid(DATA_ROOT, name=dname, transform=T.AddSelfLoops())
+data = dataset[0]
+H = np.log(data.x.shape[0])
+eta = 0.5
 
+# === Estimate good architectures ===
+sigma_s = PropagationVarianceAnalyzer(data, method='gcn')
+estimator = ChanCapConEst(data, eta, sigma_s)
+solutions = estimator.optimize_weights(H, verbose=True)
+
+# === Training loop ===
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-num_epoch = 500
 data = data.to(device)
+NUM_EPOCH = 500
+LR = 2e-4; WD = 5e-4
 
 for sol in solutions:
-  prop_layer = [data.x.shape[1]] + sol[0]
-  num_class = num_classes
-  dropout = sol[-1]
-  activation = [True] * len(sol[0])
-  model = Model(prop_layer, num_class, dropout, activation, prop_method)
-  optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=5e-4)
-  model = model.to(device)
-
-  best_val_perf, best_test_perf, best_val_epoch, best_test_epoch = 0, 0, 0, 0
-
-  for epoch in range(num_epoch):
-    tr_loss = train(model, data, optimizer)
-    val_perf = val(model, data)
-    test_perf = test(model, data)
+    prop_layer_sizes, dropout = sol[0], sol[-1]
+    model = Model([data.x.shape[1]] + prop_layer_sizes,
+                  dataset.num_classes,
+                  dropout=[dropout]*len(prop_layer_sizes),
+                  activation=[True]*len(prop_layer_sizes),
+                  prop_method='gcn').to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WD)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20)
     
-    if val_perf > best_val_perf:
-        best_val_perf = val_perf
-        best_val_epoch = epoch
-      
-    if test_perf > best_test_perf:
-        best_test_perf = test_perf
-        best_test_epoch = epoch
-        save_model(model, store)
-
-    if epoch % 10 == 0:
-      print(f'Train Loss={loss}, Epoch={epoch}')
+    best_val, best_test = 0.0, 0.0
+    epochs_no_improve = 0
+    for epoch in range(1, NUM_EPOCH+1):
+        tr_loss = train(model, data, optimizer)
+        val_acc = val(model, data)
+        test_acc = test(model, data)
+        
+        # update scheduler
+        scheduler.step(val_acc)
+        
+        # check for best
+        if val_acc > best_val:
+            best_val, epochs_no_improve = val_acc, 0
+        else:
+            epochs_no_improve += 1
+        if test_acc > best_test:
+            best_test = test_acc
+            save_model(
+                model, 
+                os.path.join(SAVE_DIR, f'model_sol_{prop_layer_sizes}_ep{epoch}.pt')
+            )
+        # early stopping
+        if epochs_no_improve >= 75:
+            print(f"No improvement for 75 epochs; stopping.")
+            break
+        
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch:03d} — train loss {tr_loss:.4f}, val {val_acc:.4f}, test {test_acc:.4f}")
     
-  print(f'Current Solution={sol[0]}: Best Val Accuracy={best_val_perf}, Epoch={best_val_epoch}, Best Test Accuracy={best_test_perf}, Epoch={best_test_epoch}')
+    print(f"Solution {prop_layer_sizes}: best val={best_val:.4f}, best test={best_test:.4f}")
