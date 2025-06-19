@@ -46,14 +46,14 @@ class PropagationVarianceAnalyzer:
         # APPNP
         appnp_k: int = 10,
         appnp_alpha: float = 0.1,
-        # GDC diffusion (PPR)
+        # GDC diffusion
         gdc_method: str = 'ppr',
         alpha: float = 0.05,
-        gdc_diffusion_eps: float = 1e-4,
+        heat_t: float = 1.0,
         # GDC sparsification
         gdc_spars_method: str = 'topk',
         gdc_avg_degree: int = 64,
-        gdc_threshold_eps: float = None,
+        gdc_threshold_eps: float = 1e-4,
         gdc_exact: bool = False,
         # SGC
         sgc_k: int = 2,
@@ -69,8 +69,6 @@ class PropagationVarianceAnalyzer:
         # S2GC
         s2gc_k: int = 1,
         s2gc_alpha: float = 0.5,
-        # heat-kernel for GDC
-        heat_t: float = 1.0,
     ):
         self.method = method.lower()
         if self.method not in self.SUPPORTED:
@@ -94,7 +92,7 @@ class PropagationVarianceAnalyzer:
         self.appnp_k         = appnp_k
         self.appnp_alpha     = appnp_alpha
         self.alpha           = alpha
-        self.gdc_diffusion_eps = gdc_diffusion_eps
+        self.heat_t          = heat_t
         self.gdc_spars_method = gdc_spars_method.lower()
         self.gdc_avg_degree  = gdc_avg_degree
         self.gdc_threshold_eps = gdc_threshold_eps
@@ -116,7 +114,6 @@ class PropagationVarianceAnalyzer:
         self.jacobi_alpha    = jacobi_alpha
         self.s2gc_k          = s2gc_k
         self.s2gc_alpha      = s2gc_alpha
-        self.heat_t          = heat_t
 
         # Validate sparsification method
         if self.gdc_spars_method not in {'topk', 'threshold'}:
