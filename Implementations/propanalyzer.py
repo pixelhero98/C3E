@@ -47,6 +47,7 @@ class PropagationVarianceAnalyzer:
         appnp_k: int = 10,
         appnp_alpha: float = 0.1,
         # GDC diffusion (PPR)
+        gdc_method: str = 'ppr',
         alpha: float = 0.05,
         gdc_diffusion_eps: float = 1e-4,
         # GDC sparsification
@@ -121,7 +122,7 @@ class PropagationVarianceAnalyzer:
         if self.gdc_spars_method not in {'topk', 'threshold'}:
             raise ValueError("gdc_spars_method must be 'topk' or 'threshold'")
         # Validate diffusion method
-        self.gdc_method = 'ppr'  # always PPR here by default
+        self.gdc_method = gdc_method  # always PPR here by default
 
     def _prop_gcn(self) -> csr_matrix:
         edge_index, edge_weight = gcn_norm(
@@ -151,11 +152,16 @@ class PropagationVarianceAnalyzer:
     def _prop_gdc(self) -> csr_matrix:
         N = self.A.shape[0]
         # diffusion kwargs
-        diff_kwargs = {
-            'method': 'ppr',
-            'alpha': self.alpha,
-            'eps': self.gdc_diffusion_eps,
-        }
+        if self.gdc_method == 'heat':
+            diff_kwargs = {
+                'method': 'heat',
+                't': self.heat_t
+            }
+        else:    
+            diff_kwargs = {
+                'method': 'ppr',
+                'alpha': self.alpha,
+            }
         # sparsification kwargs
         if self.gdc_spars_method == 'topk':
             spars_kwargs = {'method': 'topk', 'k': self.gdc_avg_degree, 'dim': 1}
