@@ -26,7 +26,7 @@ def train(model, data, optimizer):
     """
     model.train()
     optimizer.zero_grad()
-    out = model(data.x, data.edge_index)
+    out = model(data)
     loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
     loss.backward()
     optimizer.step()
@@ -45,7 +45,7 @@ def val(model, data):
     """
     model.eval()
     with torch.no_grad():
-        out = model(data.x, data.edge_index)
+        out = model(data)
         pred = out.argmax(dim=1)
         correct = int((pred[data.val_mask] == data.y[data.val_mask]).sum())
         total = int(data.val_mask.sum())
@@ -65,7 +65,7 @@ def test(model, data):
     """
     model.eval()
     with torch.no_grad():
-        out = model(data.x, data.edge_index)
+        out = model(data)
         pred = out.argmax(dim=1)
         correct = int((pred[data.test_mask] == data.y[data.test_mask]).sum())
         total = int(data.test_mask.sum())
