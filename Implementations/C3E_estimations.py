@@ -26,9 +26,10 @@ dataset = Planetoid(DATA_ROOT, name=dname, transform=T.AddSelfLoops())
 data = dataset[0]
 H = np.log(data.x.shape[0])
 eta = 0.5
+prop_method = 'gcn'
 
 # === Estimate good architectures ===
-sigma_s = PropagationVarianceAnalyzer(data, method='gcn')
+sigma_s = PropagationVarianceAnalyzer(data, method=prop_method)
 estimator = ChanCapConEst(data, eta, sigma_s)
 solutions = estimator.optimize_weights(H, verbose=True)
 
@@ -40,11 +41,11 @@ LR = 2e-4; WD = 5e-4
 
 for sol in solutions:
     prop_layer_sizes, dropout = sol[0], sol[-1]
-    model = Model([data.x.shape[1]] + prop_layer_sizes,
-                  dataset.num_classes,
-                  dropout=[dropout]*len(prop_layer_sizes),
-                  activation=[True]*len(prop_layer_sizes),
-                  prop_method='gcn').to(device)
+    model = Model(prop_layer=[data.x.shape[1]] + prop_layer_sizes,
+                  num_class=dataset.num_classes,
+                  drop_probs=dropout,
+                  use_activations=[True]*len(prop_layer_sizes),
+                  conv_methods=prop_method).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WD)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20)
     
