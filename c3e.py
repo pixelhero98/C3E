@@ -45,7 +45,8 @@ class ChanCapConEst:
         if self.M <= 0:
             raise ValueError("The number of features (M) must be > 0.")
         elif self.sigma_s is not None:
-            return self.M * (1 / self.sigma_s * n) ** (self.sigma_s * n))
+            # use self.N in place of undefined 'n'
+            return self.M * ((1.0 / self.sigma_s * self.N) ** (self.sigma_s * self.N))
         else:
             return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
 
@@ -60,9 +61,12 @@ class ChanCapConEst:
 
         term1 = np.log(2 * np.pi * np.e)
         term2 = np.sum(np.log(w[:-1])) + np.log(self.M)
-        term3 = np.sum(np.log(self.sigma_s)) if self.sigma_s is not None else np.sum(np.log(1.0 / self.d))
+        term3 = (np.sum(np.log(self.sigma_s))
+                 if self.sigma_s is not None
+                 else np.sum(np.log(1.0 / self.d)))
         term4 = len(w) * np.log(self.N)
-        return -0.5 * (term1 + term2 + term3 + term4)
+        term5 = np.log(w[-1])
+        return -0.5 * (term1 + term2 + term3 + term4 + term5)
 
     def constraint(self, w: np.ndarray, H: float = 0.0) -> float:
         """
@@ -75,16 +79,6 @@ class ChanCapConEst:
             else:
                 num = np.log(w[i-1] * w[i] / (w[i-1] + w[i]))
                 terms.append(num / (i + 1))
-        # Plain approximation
-        # for i in range(len(w)):
-        #     if i == 0:
-        #         numerator = np.log(self.M * w[0] / (self.M + w[0]))
-        #         denom = np.log(2*np.pi*np.e)/np.log(self.N*self.M*self.sigma_s[i]) + i + 1
-        #         terms.append(numerator/denom)
-        #     else:
-        #         numerator = np.log(w[i-1]*w[i]/(w[i-1]+w[i]))
-        #         denom = np.log(2*np.pi*np.e)/np.log(self.N*w[i-1]*self.sigma_s[i]) + i + 1
-        #         terms.append(numerator/denom)
         return float(np.sum(terms) - H)
 
     def optimize_weights(
@@ -125,8 +119,7 @@ class ChanCapConEst:
                 print("\n=== Estimation Summary ===")
                 print(f"Depth                : {L}")
                 print(f"Hidden dimensions    : {layers_list}")
-                # Rounded hidden dimensions
-                rounded_weights = [int(round(w)) for w in weights]
+                rounded_weights = [int(round(wi)) for wi in weights]
                 print(f"Rounded hidden dims  : {rounded_weights}")
                 print(f"Network channel capacity: {entropy:.4f}")
                 print(f"Lower bound          : {constraint_val + H:.4f} in [{H:.4f}, {(H / self.eta):.4f}]")
