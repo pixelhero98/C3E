@@ -274,26 +274,49 @@ def save_checkpoint(
     logging.info(f"Saved checkpoint: {ckpt_path}")
 
 
-def load_model(model_class, path: str, *model_args, **model_kwargs) -> torch.nn.Module:
+def load_model(
+    model_class,
+    path: Union[str, Path],
+    device: Union[str, torch.device] = 'cpu',
+    *model_args,
+    **model_kwargs
+) -> torch.nn.Module:
     """
-    Instantiate a model from model_class with provided args/kwargs,
-    load its state_dict from path, move it to the correct device,
-    and set to evaluation mode.
+    Instantiate a model for inference:
 
-    Example for your Model class:
+    1. Builds `model_class(*model_args, **model_kwargs)`.
+    2. Loads weights from `path`.
+    3. Moves to `device` and sets to eval() mode.
+
+    Args:
+        model_class: class or factory for your nn.Module.
+        path: Path to a checkpoint file saved via `save_checkpoint`.
+        device: device string or torch.device (default 'cpu').
+        *model_args, **model_kwargs: parameters for model_class constructor.
+
+    Returns:
+        An nn.Module on `device`, ready for inference.
+
+    Example usage:
+        # Assume you trained and saved a checkpoint under 'checkpoints/best_model.pt'
+        from MyModelModule import MyGNNModel
+
         model = load_model(
             Model,
-            "checkpoint.pth",
-            prop_layer=[in_dim, hidden1, ..., out_dim],
+            path='checkpoints/best_model.pt',
+            device='cuda',
+            prop_layer=[input_dim, 64, 32, output_dim],
             num_class=dataset.num_classes,
-            drop_probs=[0.5, 0.5, ...],
-            use_activations=[True, True, ...],
-            conv_methods=[...]
+            drop_probs=[0.5, 0.5, 0.0],
+            use_activations=[True, True, False],
+            conv_methods=['gcn', 'gcn', 'gcn']
         )
+        # Now `model` is on GPU and in eval() mode, ready for inference.
     """
+    device = torch.device(device)
     model = model_class(*model_args, **model_kwargs)
-    checkpoint = torch.load(path, map_location=device)            # ← load full checkpoint dict
-    model.load_state_dict(checkpoint['model_state_dict'])        # ← extract only the weights
+    checkpoint = torch.load(Path(path), map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
     return model
