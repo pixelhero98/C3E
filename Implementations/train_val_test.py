@@ -28,7 +28,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
-from torch_geometric.datasets import Planetoid
+from torch_geometric.datasets import Planetoid, WikipediaNetwork, Amazon
 from tqdm import tqdm
 from Model_factory.model import Model
 from c3e import ChanCapConEst
@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--save-dir', type=Path, default=Path.home() / 'saved',
                         help='Directory to save models and logs')
     parser.add_argument('--dataset', type=str, default='Cora',
-                        choices=['Cora', 'CiteSeer', 'PubMed'],
+                        choices=['Cora', 'CiteSeer', 'PubMed', 'Chameleon', 'Squirrel'],
                         help='Planetoid dataset name')
     parser.add_argument('--epochs', type=int, default=500,
                         help='Maximum number of training epochs')
@@ -171,7 +171,13 @@ def main() -> None:
 
     set_seed(args.seed)
 
-    dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+    if args.dataset == 'Cora' or args.dataset == 'Citeseer' or args.dataset == 'PubMed':
+        dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+    elif args.dataset == 'AmazonPhoto' or args.dataset == 'AmazonComputers':
+        dataset = Amazon(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+    else:
+        dataset = WikipediaNetwork(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+        
     data = dataset[0]
     num_nodes = data.x.size(0)
     H = np.log(num_nodes)
