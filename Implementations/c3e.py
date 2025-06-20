@@ -46,7 +46,7 @@ class ChanCapConEst:
             raise ValueError("The number of features (M) must be > 0.")
         elif self.sigma_s is not None:
             # use self.N in place of undefined 'n'
-            return self.M * ((1.0 / self.sigma_s * self.N) ** (self.sigma_s * self.N))
+            return self.M * ((1.0 / (self.sigma_s * self.N)) ** (self.sigma_s * self.N))
         else:
             return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
 
