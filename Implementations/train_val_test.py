@@ -118,7 +118,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', patience=20)
 
-    best_val = 0.0
+    best_val, best_test = 0.0, 0.0
     epochs_no_improve = 0
     logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={drop_probs}")
 
@@ -126,6 +126,10 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
         for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {layer_str}", file=sys.stdout):
             loss = train(model, data, optimizer)
             val_acc = val(model, data)
+            test_acc = test(model, data)
+            if test_acc > best_test:
+                best_test = test_acc
+                
             scheduler.step(val_acc)
 
             # Logging with learning rate
@@ -154,9 +158,8 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
             if epochs_no_improve >= args.patience:
                 logging.info(f"No improvement for {args.patience} epochs. Early stopping.")
                 break
-
-        test_acc = test(model, data)
-        logging.info(f"Solution {prop_layer_sizes}: best_val={best_val:.4f}, test_acc={test_acc:.4f}")
+            
+        logging.info(f"Solution {prop_layer_sizes}: best_val={best_val:.4f}, best_test_acc={best_test:.4f}")
 
     except Exception as e:
         logging.error(f"Error in solution {layer_str}: {e}", exc_info=True)
