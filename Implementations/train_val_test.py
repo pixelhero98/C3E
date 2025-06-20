@@ -186,7 +186,7 @@ def main() -> None:
 
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
     solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
-    data = data.to(device)
+    data = data.to(args.device)
 
     # Iterate solutions safely
     for layers, dropout in zip(solutions[0], solutions[1]):
