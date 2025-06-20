@@ -95,14 +95,9 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
-def run_solution(data, dataset, layers: list, dropout, args, device) -> None:
+def run_solution(data, dataset, layers: list, dropout: list, args, device) -> None:
     prop_layer_sizes = layers
-    # Ensure dropout list matches number of layers
-    if isinstance(dropout, float):
-        drop_probs = [dropout] * len(prop_layer_sizes)
-    else:
-        drop_probs = list(dropout)
-
+    drop_probs = dropout
     layer_str = '_'.join(map(str, prop_layer_sizes))
     sol_dir = args.save_dir / f"sol_{layer_str}"
     sol_dir.mkdir(exist_ok=True)
