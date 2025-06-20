@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
                         help='Planetoid dataset name')
     parser.add_argument('--epochs', type=int, default=500,
                         help='Maximum number of training epochs')
-    parser.add_argument('--lr', type=float, default=2e-4,
+    parser.add_argument('--lr', type=float, default=1e-4,
                         help='Learning rate')
     parser.add_argument('--weight-decay', type=float, default=5e-4,
                         help='Weight decay (L2 regularization)')
