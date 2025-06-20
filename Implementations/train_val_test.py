@@ -190,7 +190,7 @@ def main() -> None:
 
     # Iterate solutions safely
     for layers, dropout in zip(solutions[0], solutions[1]):
-        run_solution(data, dataset, layers, dropout, args, args.device)
+        run_solution(data, dataset, layers, dropout, args)
 
 if __name__ == '__main__':
     main()
