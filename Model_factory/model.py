@@ -39,8 +39,7 @@ class Model(nn.Module):
         conv_map = {
             'gcn': GCNConv,
             'appnp': APPNPConv,
-            'gdc_ppr': GCNConv,
-            'gdc_hk': GCNConv,
+            'gdc': GCNConv,
             'sgc': SGConv,
             's2gc': SSGConv,
             'jacobi': JACOBIConv,
