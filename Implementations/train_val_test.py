@@ -129,8 +129,8 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
             scheduler.step(val_acc)
 
             # Logging with learning rate
-            current_lr = optimizer.param_groups[0]['lr']
             if epoch % 10 == 0 or epoch == 1:
+                current_lr = optimizer.param_groups[0]['lr']
                 logging.info(f"Epoch {epoch}/{args.epochs} - loss: {loss:.4f}, val_acc: {val_acc:.4f}, lr: {current_lr:.2e}")
 
             # Early stopping & checkpointing
