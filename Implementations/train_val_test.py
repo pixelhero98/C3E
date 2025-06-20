@@ -22,12 +22,13 @@ Example Usage:
 
 import random
 import argparse
-from pathlib import Path
+import sys
 import logging
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
+from pathlib import Path
 from torch_geometric.datasets import Planetoid, WikipediaNetwork, Amazon
 from tqdm import tqdm
 from Model_factory.model import Model
