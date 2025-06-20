@@ -160,6 +160,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
                 break
             
         logging.info(f"Solution {prop_layer_sizes}: best_val={best_val:.4f}, best_test_acc={best_test:.4f}")
+        print(f"Solution: Hidden dimensions {prop_layer_sizes} / Dropout probabilities {drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
 
     except Exception as e:
         logging.error(f"Error in solution {layer_str}: {e}", exc_info=True)
