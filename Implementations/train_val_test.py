@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
                         help='Weight decay (L2 regularization)')
     parser.add_argument('--eta', type=float, default=0.5,
                         help='Eta parameter for capacity estimator')
-    parser.add_argument('--patience', type=int, default=75,
+    parser.add_argument('--patience', type=int, default=20,
                         help='Early stopping patience (in epochs)')
     parser.add_argument('--prop-method', type=str, default='gcn',
                         choices=['gcn', 'appnp', 'gdc', 'sgc',
