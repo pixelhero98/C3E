@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--save-dir', type=Path, default=Path.home() / 'saved',
                         help='Directory to save models and logs')
     parser.add_argument('--dataset', type=str, default='Cora',
-                        choices=['Cora', 'CiteSeer', 'PubMed', 'Chameleon', 'Squirrel'],
+                        choices=['Cora','CiteSeer','PubMed','Chameleon','Squirrel','AmazonPhoto','AmazonComputers'],
                         help='Planetoid dataset name')
     parser.add_argument('--epochs', type=int, default=500,
                         help='Maximum number of training epochs')
@@ -79,6 +79,8 @@ def parse_args() -> argparse.Namespace:
                         help='Propagation method')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
+    parser.add_argument('--device', choices=['cpu','cuda'], default='cuda' if torch.cuda.is_available() else 'cpu')
+    
     return parser.parse_args()
 
 
@@ -120,7 +122,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args, device) -> No
     logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={drop_probs}")
 
     try:
-        for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {layer_str}"):
+        for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {layer_str}", file=sys.stdout):
             loss = train(model, data, optimizer)
             val_acc = val(model, data)
             scheduler.step(val_acc)
@@ -160,7 +162,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args, device) -> No
 
     finally:
         # Clean up to free GPU memory
-        del model, optimizer, scheduler
+        del model, optimizer, scheduler, sigma_s
         torch.cuda.empty_cache()
 
 
@@ -171,9 +173,9 @@ def main() -> None:
 
     set_seed(args.seed)
 
-    if args.dataset == 'Cora' or args.dataset == 'Citeseer' or args.dataset == 'PubMed':
+    if args.dataset in {'Cora','CiteSeer','PubMed'}:
         dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
-    elif args.dataset == 'AmazonPhoto' or args.dataset == 'AmazonComputers':
+    elif args.dataset in {'AmazonPhoto','AmazonComputers'}:
         dataset = Amazon(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
     else:
         dataset = WikipediaNetwork(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
