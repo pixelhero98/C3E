@@ -113,8 +113,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args, device) -> No
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', patience=20, verbose=True
-    )
+        optimizer, mode='max', patience=20)
 
     best_val = 0.0
     epochs_no_improve = 0
