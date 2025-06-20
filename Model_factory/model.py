@@ -117,7 +117,7 @@ class Model(nn.Module):
 
     def forward(self, data):
         """
-        x:           Node feature matrix of shape [N, prop_layer[0]]
+        x: Node feature matrix of shape [N, prop_layer[0]]
         edge_index: Graph connectivity in COO format
         """
         h = data.x
