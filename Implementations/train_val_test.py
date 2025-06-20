@@ -113,7 +113,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
         use_activations=[True] * len(prop_layer_sizes),
         conv_methods=args.prop_method
     ).to(args.device)
-    data = data.to(args.device)
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', patience=20)
@@ -184,10 +184,10 @@ def main() -> None:
     data = dataset[0]
     num_nodes = data.x.size(0)
     H = np.log(num_nodes)
-
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
     solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
 
+    data = data.to(args.device)
     # Iterate solutions safely
     for layers, dropout in zip(solutions[0], solutions[1]):
         run_solution(data, dataset, layers, dropout, args)
