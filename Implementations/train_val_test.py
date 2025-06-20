@@ -99,7 +99,7 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
-def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
+def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: float, args) -> None:
     prop_layer_sizes = layers
     drop_probs = dropout
     layer_str = '_'.join(map(str, prop_layer_sizes))
@@ -159,8 +159,8 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
                 logging.info(f"No improvement for {args.patience} epochs. Early stopping.")
                 break
             
-        logging.info(f"Solution {prop_layer_sizes}: best_val={best_val:.4f}, best_test_acc={best_test:.4f}")
-        print(f"Solution: Hidden dimensions {prop_layer_sizes} / Dropout probabilities {drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
+        logging.info(f"Solution:{prop_layer_sizes}, Network Channel Capacity:{channel_capacity}, best_val={best_val:.4f}, best_test_acc={best_test:.4f}")
+        print(f"Solution: Hidden dimensions:{prop_layer_sizes} / Dropout probabilities:{drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
 
     except Exception as e:
         logging.error(f"Error in solution {layer_str}: {e}", exc_info=True)
@@ -193,8 +193,8 @@ def main() -> None:
 
     data = data.to(args.device)
     # Iterate solutions safely
-    for layers, dropout in zip(solutions[0], solutions[1]):
-        run_solution(data, dataset, layers, dropout, args)
+    for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
+        run_solution(data, dataset, layers, dropout, channel_capacity, args)
 
 if __name__ == '__main__':
     main()
