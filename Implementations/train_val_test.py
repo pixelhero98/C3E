@@ -163,7 +163,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
 
     finally:
         # Clean up to free GPU memory
-        del model, optimizer, scheduler, sigma_s
+        del model, optimizer, scheduler
         torch.cuda.empty_cache()
 
 
