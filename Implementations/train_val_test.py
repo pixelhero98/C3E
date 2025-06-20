@@ -35,6 +35,7 @@ from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
 from utility import train, val, test, save_checkpoint
 
+
 def set_seed(seed: int) -> None:
     """
     Set random seeds for reproducibility.
