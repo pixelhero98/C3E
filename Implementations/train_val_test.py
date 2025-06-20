@@ -186,13 +186,11 @@ def main() -> None:
 
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
     solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data = data.to(device)
 
     # Iterate solutions safely
     for layers, dropout in zip(solutions[0], solutions[1]):
-        run_solution(data, dataset, layers, dropout, args, device)
+        run_solution(data, dataset, layers, dropout, args, args.device)
 
 if __name__ == '__main__':
     main()
