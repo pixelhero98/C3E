@@ -94,7 +94,8 @@ class ChanCapConEst:
         """
         all_rounded = []
         all_dropouts = []
-
+        all_channel_capacity = []
+        
         for L in range(2, max_layers + 1):
             w0 = np.full(L, 2.0)
             upper = (self.N - 1) * self.M
@@ -124,6 +125,7 @@ class ChanCapConEst:
 
             all_rounded.append(rounded_weights)
             all_dropouts.append(dropout_probs)
+            all_channel_capacity.append(entropy)
 
             if verbose:
                 print("\n=== Estimation Summary ===")
@@ -137,6 +139,6 @@ class ChanCapConEst:
 
             # return all results up to the first L that meets the constraint
             if constraint_val + H > H / self.eta:
-                return [all_rounded, all_dropouts]
+                return [all_rounded, all_dropouts, all_channel_capacity]
 
         raise RuntimeError(f"Failed to meet lower bound constraint H={H} within {max_layers} layers.")
