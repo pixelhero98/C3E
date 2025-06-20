@@ -176,9 +176,8 @@ def main() -> None:
     num_nodes = data.x.size(0)
     H = np.log(num_nodes)
 
-    sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method)
-    estimator = ChanCapConEst(data, args.eta, sigma_s)
-    solutions = estimator.optimize_weights(H, verbose=True)
+    sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
+    solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data = data.to(device)
