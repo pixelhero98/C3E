@@ -98,7 +98,7 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
-def run_solution(data, dataset, layers: list, dropout: list, args, device) -> None:
+def run_solution(data, dataset, layers: list, dropout: list, args) -> None:
     prop_layer_sizes = layers
     drop_probs = dropout
     layer_str = '_'.join(map(str, prop_layer_sizes))
@@ -111,7 +111,7 @@ def run_solution(data, dataset, layers: list, dropout: list, args, device) -> No
         drop_probs=drop_probs,
         use_activations=[True] * len(prop_layer_sizes),
         conv_methods=args.prop_method
-    ).to(device)
+    ).to(args.device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
