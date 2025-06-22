@@ -9,8 +9,8 @@ from torch.optim import lr_scheduler
 from typing import Sequence
 
 
-def create_balanced_masks(y, num_classes, train_per_class, num_val, num_test):
-    num_nodes = y.size(0)
+def create_balanced_masks(data, train_per_class, num_val, num_test):
+    num_nodes = data.x.shape[0]
     train_mask = torch.zeros(num_nodes, dtype=torch.bool)
     val_mask = torch.zeros(num_nodes, dtype=torch.bool)
     test_mask = torch.zeros(num_nodes, dtype=torch.bool)
