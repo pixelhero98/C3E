@@ -6,26 +6,73 @@ import logging
 from pathlib import Path
 from torch import nn, optim
 from torch.optim import lr_scheduler
-from typing import Sequence
+from typing import Sequence, Tuple, Optional
+from torch_geometric.data import Data
 
 
-def create_balanced_masks(data, train_per_class, num_val, num_test):
-    num_nodes = data.x.shape[0]
-    train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-    val_mask = torch.zeros(num_nodes, dtype=torch.bool)
-    test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+def create_masks(
+    data: Data,
+    train_per_class: int,
+    num_val: int,
+    num_test: int,
+    *,
+    labels: Optional[torch.Tensor] = None,
+    num_classes: Optional[int] = None,
+    seed: Optional[int] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Generate boolean train/val/test masks with a fixed number of training
+    examples per class, then random validation & test splits from the remainder.
 
+    Args:
+        data (Data): PyG Data object with node features & labels.
+        train_per_class (int): Number of train nodes to sample from each class.
+        num_val (int): Total number of validation nodes.
+        num_test (int): Total number of test nodes.
+        labels (Tensor, optional): 1D long tensor of node labels.  If None,
+            will use `data.y`.
+        num_classes (int, optional): Number of classes.  If None, inferred as
+            `labels.max().item() + 1`.
+        seed (int, optional): If set, seeds the RNG for fixed splits.
+
+    Returns:
+        train_mask, val_mask, test_mask (Tensor[bool], each of shape [num_nodes])
+    """
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    # 1) get labels & num_classes
+    y = labels if labels is not None else data.y
+    y = y.view(-1)
+    if num_classes is None:
+        num_classes = int(y.max().item()) + 1
+
+    N = y.size(0)
+    train_mask = torch.zeros(N, dtype=torch.bool)
+    val_mask   = torch.zeros(N, dtype=torch.bool)
+    test_mask  = torch.zeros(N, dtype=torch.bool)
+
+    # 2) sample train_per_class from each class
     for c in range(num_classes):
-        class_idx = (y == c).nonzero(as_tuple=False).view(-1)
-        class_idx = class_idx[torch.randperm(class_idx.size(0))]
+        idx_c = (y == c).nonzero(as_tuple=False).view(-1)
+        if idx_c.numel() < train_per_class:
+            raise ValueError(
+                f"Class {c} has only {idx_c.numel()} samples, "
+                f"but you requested {train_per_class}"
+            )
+        perm = idx_c[torch.randperm(idx_c.size(0))]
+        train_mask[perm[:train_per_class]] = True
 
-        train_mask[class_idx[:train_per_class]] = True
-
-    remaining_indices = torch.where(~train_mask)[0]
-    remaining_indices = remaining_indices[torch.randperm(remaining_indices.size(0))]
-
-    val_mask[remaining_indices[:num_val]] = True
-    test_mask[remaining_indices[num_val:num_val + num_test]] = True
+    # 3) split the rest into val & test
+    rem = (~train_mask).nonzero(as_tuple=False).view(-1)
+    rem = rem[torch.randperm(rem.size(0))]
+    if rem.numel() < (num_val + num_test):
+        raise ValueError(
+            f"Not enough remaining samples ({rem.numel()}) for "
+            f"{num_val} val + {num_test} test"
+        )
+    val_mask[rem[:num_val]] = True
+    test_mask[rem[num_val : num_val + num_test]] = True
 
     return train_mask, val_mask, test_mask
     
