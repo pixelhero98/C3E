@@ -9,6 +9,26 @@ from torch.optim import lr_scheduler
 from typing import Sequence
 
 
+def create_balanced_masks(y, num_classes, train_per_class, num_val, num_test):
+    num_nodes = y.size(0)
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+
+    for c in range(num_classes):
+        class_idx = (y == c).nonzero(as_tuple=False).view(-1)
+        class_idx = class_idx[torch.randperm(class_idx.size(0))]
+
+        train_mask[class_idx[:train_per_class]] = True
+
+    remaining_indices = torch.where(~train_mask)[0]
+    remaining_indices = remaining_indices[torch.randperm(remaining_indices.size(0))]
+
+    val_mask[remaining_indices[:num_val]] = True
+    test_mask[remaining_indices[num_val:num_val + num_test]] = True
+
+    return train_mask, val_mask, test_mask
+    
 # Ensure your model and data live on the same device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
