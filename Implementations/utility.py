@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from torch_geometric.utils import get_laplacian
 from torch_sparse import SparseTensor
 import logging
 from pathlib import Path
