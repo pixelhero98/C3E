@@ -202,7 +202,7 @@ def main() -> None:
         results.append(run_solution(data, dataset, layers, dropout, channel_capacity, args))
 
     opt_result_index = results.index(max(results))
-    print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity:{solutions[-1][opt_result_index]}}")
+    print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity:{solutions[-1][opt_result_index]}")
 
 if __name__ == '__main__':
     main()
