@@ -117,7 +117,6 @@ def val(model, data):
         total = int(data.val_mask.sum())
     return correct / total
 
-
 def test(model, data):
     """
     Compute test accuracy.
@@ -173,7 +172,6 @@ def get_model_rep(model, data):
 
     return conv_reps, act_reps
 
-
 def rep_entropy(rep, nbins: int = 100) -> float:
     """
     Estimate Shannon entropy of a flattened tensor by:
@@ -193,7 +191,6 @@ def rep_entropy(rep, nbins: int = 100) -> float:
     entropy = -(probs * torch.log(probs + eps)).sum().item()
     return entropy
 
-
 def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     """
     Print entropy for input features and each conv and activation layer separately.
@@ -209,11 +206,7 @@ def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     print(entropies)
     print('===============================================================')
 
-
 def compute_sparse_laplacian(edge_index, num_nodes: int) -> SparseTensor:
-    """
-    Build the unnormalized graph Laplacian as a SparseTensor: L = D - A
-    """
     row, col = edge_index
     N = num_nodes
     A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
@@ -226,11 +219,7 @@ def compute_sparse_laplacian(edge_index, num_nodes: int) -> SparseTensor:
     L = D - A
     return L
 
-
 def compute_normalized_laplacian(edge_index, num_nodes: int) -> SparseTensor:
-    """
-    Build the symmetric normalized Laplacian: L_sym = I - D^{-1/2} A D^{-1/2}
-    """
     row, col = edge_index
     N = num_nodes
     A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
@@ -246,27 +235,49 @@ def compute_normalized_laplacian(edge_index, num_nodes: int) -> SparseTensor:
     L_sym = I - D_inv_sqrt.matmul(A).matmul(D_inv_sqrt)
     return L_sym
 
-
-def compute_dirichlet_energy(node_features: torch.Tensor, L: SparseTensor) -> float:
+# New wrapper to switch between Laplacians:
+def compute_laplacian(
+    edge_index,
+    num_nodes: int,
+    normalized: bool = False
+) -> SparseTensor:
     """
-    Compute Dirichlet energy: trace(X^T L X).
-    Works with both sparse and dense Laplacians.
-    """
-    X = node_features.to(device)
-    LX = L.matmul(X) if hasattr(L, 'matmul') else L @ X
-    energy = torch.trace(X.t() @ LX)
-    return energy.item()
+    Build either the unnormalized (D - A) or symmetric normalized (I - D^{-1/2} A D^{-1/2}) Laplacian.
 
+    Args:
+        edge_index: edge index tensor of shape [2, E]
+        num_nodes: number of nodes in the graph
+        normalized: if True, returns normalized Laplacian; else unnormalized.
 
-def show_layer_dirichlet_energy(conv_reps, act_reps, data):
+    Returns:
+        SparseTensor: Laplacian matrix
     """
-    Print normalized Dirichlet energy for input, conv, and activation layers.
-    """
-    data = data.to(device)
-    L = compute_sparse_laplacian(data.edge_index, data.x.size(0)) # compute_normalized_laplacian(data.edge_index, data.x.size(0))
+    if normalized:
+        return compute_normalized_laplacian(edge_index, num_nodes)
+    else:
+        return compute_sparse_laplacian(edge_index, num_nodes)
 
+# Updated energy display to accept a choice:
+def show_layer_dirichlet_energy(
+    conv_reps, act_reps, data: Data,
+    normalized: bool = False
+):
+    """
+    Print normalized Dirichlet energy (relative to input) for input, conv, and activation layers.
+
+    Args:
+        conv_reps: list of conv-layer outputs (cpu, detached)
+        act_reps: list of activation-layer outputs (cpu, detached)
+        data: PyG data object with x and edge_index
+        normalized: whether to use the symmetric normalized Laplacian
+    """
+    data = data.to(data.x.device)
+    L = compute_laplacian(data.edge_index, data.x.size(0), normalized=normalized)
+
+    # baseline energy on input features
     base_energy = compute_dirichlet_energy(data.x, L)
     energies = {'input': 1.0}
+
     for idx, rep in enumerate(conv_reps, start=1):
         energies[f'conv_{idx}'] = compute_dirichlet_energy(rep, L) / base_energy
     for idx, rep in enumerate(act_reps, start=1):
@@ -275,16 +286,13 @@ def show_layer_dirichlet_energy(conv_reps, act_reps, data):
     print(energies)
     print('===============================================================')
 
-
 def vector_mean(rep: torch.Tensor) -> torch.Tensor:
     """Mean over the node dimension."""
     return rep.mean(dim=0)
 
-
 def vector_variance(rep: torch.Tensor) -> torch.Tensor:
     """Variance (unbiased) over the node dimension."""
     return rep.var(dim=0, unbiased=True)
-
 
 def mean_activation_per_layer(reps):
     """
@@ -292,13 +300,11 @@ def mean_activation_per_layer(reps):
     """
     return [rep.mean().item() for rep in reps]
 
-
 def mean_node_activation_per_layer(reps):
     """
     Compute per-layer mean activation averaged over nodes (vector per layer).
     """
     return [vector_mean(rep).cpu() for rep in reps]
-
 
 # Model persistence utilities
 def save_checkpoint(
@@ -338,7 +344,6 @@ def save_checkpoint(
     ckpt_path = sol_dir / f"best_val_{layer_str}_ep{epoch}.pt"
     torch.save(checkpoint, ckpt_path)
     logging.info(f"Saved checkpoint: {ckpt_path}")
-
 
 def load_model(
     model_class,
