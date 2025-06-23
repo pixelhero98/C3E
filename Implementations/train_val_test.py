@@ -164,7 +164,7 @@ def run_solution(data, dataset, layers: list, dropout: list, channelcapacity: fl
                 break
             
         logging.info(f"Solution:{prop_layer_sizes}, Network Channel Capacity:{channel_capacity}, best_val={best_val:.4f}, best_test_acc={best_test:.4f}")
-        print(f"Solution: Hidden dimensions:{prop_layer_sizes} / Dropout probabilities:{drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
+        # print(f"Solution: Hidden dimensions:{prop_layer_sizes} / Dropout probabilities:{drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
 
     except Exception as e:
         logging.error(f"Error in solution {layer_str}: {e}", exc_info=True)
@@ -173,13 +173,13 @@ def run_solution(data, dataset, layers: list, dropout: list, channelcapacity: fl
         # Clean up to free GPU memory
         del model, optimizer, scheduler
         torch.cuda.empty_cache()
-
+        
+    return best_test
 
 def main() -> None:
     args = parse_args()
     setup_logging(args.save_dir)
     logging.info(f"Arguments: {args}")
-
     set_seed(args.seed)
 
     if args.dataset in {'Cora','CiteSeer','PubMed'}:
@@ -188,7 +188,8 @@ def main() -> None:
         dataset = Amazon(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
     else:
         dataset = WikipediaNetwork(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
-        
+
+    results = []
     data = dataset[0]
     num_nodes = data.x.size(0)
     H = np.log(num_nodes)
@@ -198,7 +199,10 @@ def main() -> None:
     data = data.to(args.device)
     # Iterate solutions safely
     for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
-        run_solution(data, dataset, layers, dropout, channel_capacity, args)
+        results.append(run_solution(data, dataset, layers, dropout, channel_capacity, args))
+
+    opt_result_index = results.index(max(results))
+    print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity={solutions[-1][opt_result_index]}}")
 
 if __name__ == '__main__':
     main()
