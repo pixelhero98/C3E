@@ -79,8 +79,10 @@ def parse_args() -> argparse.Namespace:
                         choices=['gcn', 'appnp', 'gdc', 'sgc',
                                  'chebnetii', 'gprgnn', 'jacobiconv', 's2gc'],
                         help='Propagation method')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='Random seed')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--train_per_class', type=int, default=20, help='Number of node per class')
+    parser.add_argument('--num_val', type=int, default=500, help='Number of node for validation')
+    parser.add_argument('--num_test', type=int, default=1000, help='Number of node for test')
     parser.add_argument('--device', choices=['cpu','cuda'], default='cuda' if torch.cuda.is_available() else 'cpu')
     
     return parser.parse_args()
@@ -192,7 +194,7 @@ def main() -> None:
     H = np.log(num_nodes)
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
     solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
-
+    data.train_mask, data.val_mask, data.test_mask = create_masks(data, args.train_per_class, args.num_val, args.num_test)
     data = data.to(args.device)
     # Iterate solutions safely
     for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
