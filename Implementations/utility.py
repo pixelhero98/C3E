@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from torch import nn, optim
 from torch.optim import lr_scheduler
-from typing import Sequence, Tuple, Optional
+from typing import Sequence, Tuple, Optional, Union
 from torch_geometric.data import Data
 
 
