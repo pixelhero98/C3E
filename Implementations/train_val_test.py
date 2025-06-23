@@ -28,6 +28,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
+from utility import create_masks 
 from pathlib import Path
 from torch_geometric.datasets import Planetoid, WikipediaNetwork, Amazon
 from tqdm import tqdm
