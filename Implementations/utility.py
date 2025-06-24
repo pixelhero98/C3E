@@ -288,6 +288,8 @@ def show_layer_dirichlet_energy(
     print(energies)
     print('===============================================================')
 
+    return energies
+
 def vector_mean(rep: torch.Tensor) -> torch.Tensor:
     """Mean over the node dimension."""
     return rep.mean(dim=0)
