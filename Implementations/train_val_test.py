@@ -4,7 +4,7 @@ Example Usage:
     python train_gcn.py
 
     # Custom dataset and paths:
-    python train_val_test.py \
+    python3 train_val_test.py \
         --dataset CiteSeer \
         --data_root /path/to/data \
         --save_dir /path/to/checkpoints \
