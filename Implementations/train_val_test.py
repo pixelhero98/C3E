@@ -6,14 +6,14 @@ Example Usage:
     # Custom dataset and paths:
     python train_val_test.py \
         --dataset CiteSeer \
-        --data-root /path/to/data \
-        --save-dir /path/to/checkpoints \
+        --data_root /path/to/data \
+        --save_dir /path/to/checkpoints \
         --epochs 300 \
         --lr 1e-3 \
-        --weight-decay 1e-4 \
+        --weight_decay 1e-4 \
         --eta 0.7 \
         --patience 50 \
-        --prop-method gcn \
+        --prop_method gcn \
         --seed 123
 
     # Minimal example (only specify save directory):
