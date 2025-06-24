@@ -70,13 +70,13 @@ def parse_args() -> argparse.Namespace:
                         help='Maximum number of training epochs')
     parser.add_argument('--lr', type=float, default=1e-4,
                         help='Learning rate')
-    parser.add_argument('--weight-decay', type=float, default=5e-4,
+    parser.add_argument('--weight_decay', type=float, default=5e-4,
                         help='Weight decay (L2 regularization)')
     parser.add_argument('--eta', type=float, default=0.5,
                         help='Eta parameter for capacity estimator')
     parser.add_argument('--patience', type=int, default=20,
                         help='Early stopping patience (in epochs)')
-    parser.add_argument('--prop-method', type=str, default='gcn',
+    parser.add_argument('--prop_method', type=str, default='gcn',
                         choices=['gcn', 'appnp', 'gdc', 'sgc',
                                  'chebnetii', 'gprgnn', 'jacobiconv', 's2gc'],
                         help='Propagation method')
