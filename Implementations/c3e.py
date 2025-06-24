@@ -73,26 +73,23 @@ class ChanCapConEst:
         Inequality constraint: sum of log-terms minus H >= 0.
         """
         terms = []
-        if sigma_s == None:
-            for i in range(len(w)):
-                if i == 0:
-                    num = np.log(self.M * w[0] / (self.M + w[0]))
-                    terms.append(num / (i + 1))
-                else:
-                    num = np.log(w[i - 1] * w[i] / (w[i - 1] + w[i]))
-                    terms.append(num / (i + 1))
-            return float(np.sum(terms) - H)
+        i = np.arange(len(w)) + 1
+        if self.sigma_s is None:
+            numerators = np.empty_like(w)
+            numerators[0] = np.log(self.M * w[0] / (self.M + w[0]))
+            numerators[1:] = np.log(w[:-1] * w[1:] / (w[:-1] + w[1:]))
+            terms = numerators / i
         else:
-            for i in range(len(w)):
-                if i == 0:
-                    tmp = np.log(2 * np.pi * np.e) / np.log(self.N * self.M * self.sigma_s) + i + 1
-                    num = np.log(self.M * w[0] / (self.M + w[0]))
-                    terms.append(num / tmp)
-                else:
-                    tmp = np.log(2 * np.pi * np.e) / np.log(self.N * w[i - 1] * self.sigma_s) + i + 1
-                    num = np.log(w[i - 1] * w[i] / (w[i - 1] + w[i]))
-                    terms.append(num / tmp)
-            return float(np.sum(terms) - H)
+            log_constants = np.log(2 * np.pi * np.e)
+            tmp = np.empty_like(w, dtype=float)
+            tmp[0] = log_constants / np.log(self.N * self.M * self.sigma_s) + 1
+            tmp[1:] = log_constants / np.log(self.N * w[:-1] * self.sigma_s) + i[1:]
+            numerators = np.empty_like(w)
+            numerators[0] = np.log(self.M * w[0] / (self.M + w[0]))
+            numerators[1:] = np.log(w[:-1] * w[1:] / (w[:-1] + w[1:]))
+            terms = numerators / tmp
+        return float(terms.sum() - H)
+
             
     def optimize_weights(
         self,
