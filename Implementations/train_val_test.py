@@ -175,7 +175,7 @@ def run_solution(data, dataset, layers: list, dropout: list, channelcapacity: fl
         del model, optimizer, scheduler
         torch.cuda.empty_cache()
         
-    return best_test
+    return best_test, sol_dir
 
 def main() -> None:
     args = parse_args()
@@ -190,7 +190,7 @@ def main() -> None:
     else:
         dataset = WikipediaNetwork(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
 
-    results = []
+    results, sol_dirs = [], []
     data = dataset[0]
     num_nodes = data.x.size(0)
     H = np.log(num_nodes)
@@ -200,10 +200,14 @@ def main() -> None:
     data = data.to(args.device)
     # Iterate solutions safely
     for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
-        results.append(run_solution(data, dataset, layers, dropout, channel_capacity, args))
+        res, sols = run_solution(data, dataset, layers, dropout, channel_capacity, args)
+        results.append(res)
+        sol_dirs.append(sols)
 
     opt_result_index = results.index(max(results))
     print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity:{solutions[-1][opt_result_index]}")
-
+    rep_entropy = representation_entropy(sol_dirs[opt_result_index], args.device, solutions[0][opt_result_index], dataset.num_classes, solutions[1][opt_result_index], [True] * solutions[0][opt_result_index], args.prop_method, data, nbins=2000)
+    rep_energy = dirichlet_energy(sol_dirs[opt_result_index], args.device, solutions[0][opt_result_index], dataset.num_classes, solutions[1][opt_result_index], [True] * solutions[0][opt_result_index], args.prop_method, data, normalized=True)
+    
 if __name__ == '__main__':
     main()
