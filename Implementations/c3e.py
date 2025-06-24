@@ -73,14 +73,27 @@ class ChanCapConEst:
         Inequality constraint: sum of log-terms minus H >= 0.
         """
         terms = []
-        for i in range(len(w)):
-            if i == 0:
-                terms.append(np.log(self.M * w[0] / (self.M + w[0])))
-            else:
-                num = np.log(w[i-1] * w[i] / (w[i-1] + w[i]))
-                terms.append(num / (i + 1))
-        return float(np.sum(terms) - H)
-
+        if sigma_s == None:
+            for i in range(len(w)):
+                if i == 0:
+                    num = np.log(self.M * w[0] / (self.M + w[0]))
+                    terms.append(num / (i + 1))
+                else:
+                    num = np.log(w[i - 1] * w[i] / (w[i - 1] + w[i]))
+                    terms.append(num / (i + 1))
+            return float(np.sum(terms) - H)
+        else:
+            for i in range(len(w)):
+                if i == 0:
+                    tmp = np.log(2 * np.pi * np.e) / np.log(self.N * self.M * self.sigma_s) + i + 1
+                    num = np.log(self.M * w[0] / (self.M + w[0]))
+                    terms.append(num / tmp)
+                else:
+                    tmp = np.log(2 * np.pi * np.e) / np.log(self.N * w[i - 1] * self.sigma_s) + i + 1
+                    num = np.log(w[i - 1] * w[i] / (w[i - 1] + w[i]))
+                    terms.append(num / tmp)
+            return float(np.sum(terms) - H)
+            
     def optimize_weights(
         self,
         H: float,
