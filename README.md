@@ -1,7 +1,5 @@
 # Channel Capacity Constrained Estimation
 
-## Intro
-
 ## Example results (**no graph rewiring, round to the continuous values to the nearest for implementation**)
 
 **Cora**,
@@ -163,3 +161,4 @@
 
 
 ## Example Usage
+python3 train_val_test.py --dataset CiteSeer --data_root /path/to/data --save_dir /path/to/checkpoints --epochs 300 --lr 1e-3 --weight_decay 1e-4 --eta 0.5 --prop_method gcn
