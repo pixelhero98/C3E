@@ -103,12 +103,11 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
-def run_solution(data, dataset, layers: list, dropout: list, channelcapacity: float, args) -> None:
+def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: float, args) -> None:
     prop_layer_sizes = layers
     drop_probs = dropout
-    channel_capacity = channelcapacity
-    layer_str = '_'.join(map(str, channel_capacity))
-    sol_dir = args.save_dir / f"sol_{layer_str}"
+    channel_str = f"{channel_capacity:.6g}".replace('.', 'p')
+    sol_dir = args.save_dir / f"sol_{channel_str}"
     sol_dir.mkdir(exist_ok=True)
 
     model = Model(
