@@ -8,7 +8,7 @@ from torch_geometric.utils import get_laplacian
 
 class ChebIIConv(MessagePassing):
     """
-    ChebNetII convolution layer from
+    One layer operation of ChebNetII:
     "Convolutional Neural Networks on Graphs with Chebyshev Approximation, Revisited".
     """
     def __init__(self,
