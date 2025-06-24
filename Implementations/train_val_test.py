@@ -15,9 +15,6 @@ Example Usage:
         --patience 50 \
         --prop_method gcn \
         --seed 123
-
-    # Minimal example (only specify save directory):
-    python train_gcn.py --save-dir ./models
 """
 
 import random
