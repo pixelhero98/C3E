@@ -36,6 +36,7 @@ from Model_factory.model import Model
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
 from utility import train, val, test, save_checkpoint
+from Visualizations.entropy_energy import representation_entropy, dirichlet_energy
 
 
 def set_seed(seed: int) -> None:
