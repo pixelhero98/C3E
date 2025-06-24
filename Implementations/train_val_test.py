@@ -107,7 +107,7 @@ def run_solution(data, dataset, layers: list, dropout: list, channelcapacity: fl
     prop_layer_sizes = layers
     drop_probs = dropout
     channel_capacity = channelcapacity
-    layer_str = '_'.join(map(str, prop_layer_sizes))
+    layer_str = '_'.join(map(str, channel_capacity))
     sol_dir = args.save_dir / f"sol_{layer_str}"
     sol_dir.mkdir(exist_ok=True)
 
