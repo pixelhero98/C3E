@@ -9,7 +9,7 @@ def buildAdj(edge_index: Tensor,
              n_node: int,
              aggr: str = "gcn") -> SparseTensor:
     """
-    Constructs (normalized) SparseTensor adjacency exactly as in impl/PolyConv.py.
+    Constructs (normalized) SparseTensor adjacency exactly as in Jacobiconv paper.
     Supports 'mean', 'sum', 'gcn'; moves to CUDA if needed.
     """
     deg = degree(edge_index[0], n_node)
@@ -41,7 +41,7 @@ def JacobiConv(L: int,
                l: float = -1.0,
                r: float = 1.0) -> Tensor:
     """
-    Implements the JacobiConv recurrence from GraphPKU's PolyConv:
+    Implements the JacobiConv recurrence from Jacobiconv paper:
       • L=0: returns xs[0]
       • L=1: closed‐form with domain [l,r]
       • L>=2: three‐term recurrence with domain scaling
@@ -73,7 +73,7 @@ def JacobiConv(L: int,
 
 class JACOBIConv(nn.Module):
     """
-    One layer of PolyConvFrame with JacobiConv:
+    One layer operation of JacobiConv:
       - builds [P0 x, P1 x, … P_K x]
       - concatenates and a final linear projection
     """
