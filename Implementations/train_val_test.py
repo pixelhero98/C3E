@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train GCN on Planetoid dataset with capacity estimation."
     )
-    parser.add_argument('--data-root', type=Path, default=Path.home() / 'data',
+    parser.add_argument('--data_root', type=Path, default=Path.home() / 'data',
                         help='Root directory for datasets')
     parser.add_argument('--save_dir', type=Path, default=Path.home() / 'saved',
                         help='Directory to save models and logs')
