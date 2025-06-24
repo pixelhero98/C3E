@@ -124,7 +124,7 @@ def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: f
     logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={drop_probs}")
 
     try:
-        for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {layer_str}", file=sys.stdout):
+        for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {channel_str}", file=sys.stdout):
             loss = train(model, data, optimizer)
             val_acc = val(model, data)
             test_acc = test(model, data)
@@ -144,7 +144,7 @@ def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: f
                 epochs_no_improve = 0
                 save_checkpoint(
                     sol_dir=sol_dir,
-                    layer_str=layer_str,
+                    layer_str=channel_str,
                     epoch=epoch,
                     model=model,
                     optimizer=optimizer,
@@ -164,7 +164,7 @@ def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: f
         # print(f"Solution: Hidden dimensions:{prop_layer_sizes} / Dropout probabilities:{drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
 
     except Exception as e:
-        logging.error(f"Error in solution {layer_str}: {e}", exc_info=True)
+        logging.error(f"Error in solution {channel_str}: {e}", exc_info=True)
 
     finally:
         # Clean up to free GPU memory
