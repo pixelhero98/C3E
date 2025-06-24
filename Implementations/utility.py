@@ -172,7 +172,7 @@ def get_model_rep(model, data):
 
     return conv_reps, act_reps
 
-def rep_entropy(rep, nbins: int = 100) -> float:
+def rep_entropy(rep, nbins: int = 2000) -> float:
     """
     Estimate Shannon entropy of a flattened tensor by:
       1. Softmax to map values into [0,1]
