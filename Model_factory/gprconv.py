@@ -5,8 +5,7 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
 class GPRConv(MessagePassing):
-    r"""Generalized PageRank convolution with feature projection.
-
+    """One layer operation of GPRGNN.
     Args:
         in_channels (int): Input feature dimension.
         out_channels (int): Output feature dimension.
