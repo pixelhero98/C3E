@@ -10,8 +10,7 @@ from torch_geometric.utils.sparse import set_sparse_value
 from torch.nn import Linear
 
 class APPNPConv(MessagePassing):
-    r"""Approximate Personalized Propagation of Neural Predictions convolution
-    layer with input/output feature transformation.
+    """One layer operation of APPNP with input/output feature transformation.
 
     Args:
         in_channels (int): Size of each input sample.
