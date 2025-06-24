@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument('--data-root', type=Path, default=Path.home() / 'data',
                         help='Root directory for datasets')
-    parser.add_argument('--save-dir', type=Path, default=Path.home() / 'saved',
+    parser.add_argument('--save_dir', type=Path, default=Path.home() / 'saved',
                         help='Directory to save models and logs')
     parser.add_argument('--dataset', type=str, default='Cora',
                         choices=['Cora','CiteSeer','PubMed','Chameleon','Squirrel','AmazonPhoto','AmazonComputers'],
