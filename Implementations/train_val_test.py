@@ -1,9 +1,10 @@
 """
-Example Usage:
-    # Default settings (Cora dataset):
-    python train_gcn.py
+Example usage:
 
-    # Custom dataset and paths:
+    # Default settings on Cora (data in ~/data, outputs in ~/saved):
+    python3 train_val_test.py
+
+    # Using CiteSeer, custom paths, and tuned hyperparams:
     python3 train_val_test.py \
         --dataset CiteSeer \
         --data_root /path/to/data \
@@ -14,7 +15,11 @@ Example Usage:
         --eta 0.7 \
         --patience 50 \
         --prop_method gcn \
-        --seed 123
+        --seed 123 \
+        --train_per_class 20 \
+        --num_val 500 \
+        --num_test 1000 \
+        --device cuda
 """
 
 import random
