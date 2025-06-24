@@ -206,6 +206,8 @@ def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     print(entropies)
     print('===============================================================')
 
+    return entropies
+
 def compute_sparse_laplacian(edge_index, num_nodes: int) -> SparseTensor:
     row, col = edge_index
     N = num_nodes
