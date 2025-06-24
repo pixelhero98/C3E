@@ -89,8 +89,7 @@ class ChanCapConEst:
             numerators[1:] = np.log(w[:-1] * w[1:] / (w[:-1] + w[1:]))
             terms = numerators / tmp
         return float(terms.sum() - H)
-
-            
+     
     def optimize_weights(
         self,
         H: float,
