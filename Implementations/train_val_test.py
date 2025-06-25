@@ -33,6 +33,7 @@ import torch_geometric.transforms as T
 from utility import create_masks 
 from pathlib import Path
 from torch_geometric.datasets import Planetoid, WikipediaNetwork, Amazon
+from ogb.nodeproppred import PygNodePropPredDataset
 from tqdm import tqdm
 from Model_factory.model import Model
 from c3e import ChanCapConEst
@@ -188,8 +189,10 @@ def main() -> None:
         dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
     elif args.dataset in {'AmazonPhoto','AmazonComputers'}:
         dataset = Amazon(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
-    else:
+    elif args.dataset in {'Chameleon','Squirrel'}:
         dataset = WikipediaNetwork(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+    else:
+        dataset = PygNodePropPredDataset(name=args.dataset, transform=T.AddSelfLoops())
 
     results, sol_dirs = [], []
     data = dataset[0]
@@ -197,7 +200,19 @@ def main() -> None:
     H = np.log(num_nodes)
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
     solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
-    data.train_mask, data.val_mask, data.test_mask = create_masks(data, args.train_per_class, args.num_val, args.num_test, seed=args.seed)
+
+    if args.dataset not in {'ogbn-arxiv','ogbn-papers100M'}:
+        data.train_mask, data.val_mask, data.test_mask = create_masks(data, args.train_per_class, args.num_val, args.num_test, seed=args.seed)
+    else:
+        split_idx = dataset.get_idx_split()
+        train_idx, valid_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
+        data.train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        data.val_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        data.test_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        data.train_mask[train_idx] = True
+        data.val_mask[valid_idx] = True
+        data.test_mask[test_idx] = True
+        
     data = data.to(args.device)
     # Iterate solutions safely
     for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
