@@ -221,7 +221,7 @@ def main() -> None:
         sol_dirs.append(sols)
 
     opt_result_index = results.index(max(results))
-    print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity:{solutions[-1][opt_result_index]}")
+    print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity:{solutions[-1][opt_result_index]}, Performance:{max(results)}")
     rep_entropy = representation_entropy(sol_dirs[opt_result_index], args.device, solutions[0][opt_result_index], dataset.num_classes, solutions[1][opt_result_index], [True] * solutions[0][opt_result_index], args.prop_method, data, nbins=2000)
     rep_energy = dirichlet_energy(sol_dirs[opt_result_index], args.device, solutions[0][opt_result_index], dataset.num_classes, solutions[1][opt_result_index], [True] * solutions[0][opt_result_index], args.prop_method, data, normalized=True)
     
