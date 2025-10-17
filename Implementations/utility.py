@@ -347,8 +347,8 @@ def save_checkpoint(
     scheduler: lr_scheduler._LRScheduler,
     best_val: float,
     layer_sizes: Sequence[int],
-    dropout: float,
-) -> None:
+    dropout: Sequence[float],
+) -> Path:
     """
     Save training state to disk.
 
@@ -361,7 +361,10 @@ def save_checkpoint(
         scheduler: Learning-rate scheduler.
         best_val: Best validation accuracy so far.
         layer_sizes: Sizes of each hidden layer.
-        dropout: Dropout probability.
+        dropout: Dropout probabilities for each layer.
+
+    Returns:
+        The path to the saved checkpoint.
     """
     checkpoint = {
         'epoch': epoch,
@@ -375,6 +378,7 @@ def save_checkpoint(
     ckpt_path = sol_dir / f"best_val_{layer_str}_ep{epoch}.pt"
     torch.save(checkpoint, ckpt_path)
     logging.info(f"Saved checkpoint: {ckpt_path}")
+    return ckpt_path
 
 def load_model(
     model_class,
