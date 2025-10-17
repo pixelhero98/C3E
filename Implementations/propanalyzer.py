@@ -1,10 +1,17 @@
+from __future__ import annotations
+
+from typing import Dict, Optional
+
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix, diags, identity
 from torch_geometric.data import Data
 from torch_geometric.transforms import GDC
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
-from torch_geometric.utils import to_scipy_sparse_matrix, from_scipy_sparse_matrix
+from torch_geometric.utils import (
+    from_scipy_sparse_matrix,
+    to_scipy_sparse_matrix,
+)
 
 
 def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
@@ -49,10 +56,10 @@ class PropagationVarianceAnalyzer:
         sgc_k: int = 2,
         # ChebNet II
         cheb_k: int = 10,
-        cheb_theta: np.ndarray = None,
+        cheb_theta: Optional[np.ndarray] = None,
         # GPRGNN
         gpr_k: int = 10,
-        gpr_theta: np.ndarray = None,
+        gpr_theta: Optional[np.ndarray] = None,
         # JacobiConv
         jacobi_iters: int = 10,
         jacobi_alpha: float = 0.5,
@@ -66,16 +73,34 @@ class PropagationVarianceAnalyzer:
 
         # Build adjacency CSR
         if isinstance(data, Data):
-            edge_weight = getattr(data, 'edge_weight', torch.ones(data.edge_index.size(1)))
+            edge_index = data.edge_index
+            if edge_index.is_cuda:
+                edge_index = edge_index.cpu()
+            edge_weight = getattr(data, 'edge_weight', None)
+            if edge_weight is None:
+                edge_weight = torch.ones(
+                    edge_index.size(1), dtype=torch.float32, device=edge_index.device
+                )
+            if edge_weight.is_cuda:
+                edge_weight = edge_weight.cpu()
+            edge_weight = edge_weight.to(torch.float32)
             self.A = to_scipy_sparse_matrix(
-                data.edge_index, edge_weight, num_nodes=data.num_nodes
+                edge_index, edge_weight, num_nodes=data.num_nodes
             ).tocsr()
-            self.data = data
+            self.data = Data(
+                edge_index=edge_index,
+                edge_weight=edge_weight,
+                num_nodes=data.num_nodes,
+            )
         elif isinstance(data, csr_matrix):
-            self.A = data
+            self.A = data.tocsr()
             # Reconstruct a minimal PyG Data for methods that need edge_index
             edge_index, edge_weight = from_scipy_sparse_matrix(self.A)
-            self.data = Data(edge_index=edge_index, edge_weight=edge_weight)
+            self.data = Data(
+                edge_index=edge_index,
+                edge_weight=edge_weight,
+                num_nodes=self.A.shape[0],
+            )
         else:
             raise TypeError("`data` must be a PyG Data or scipy.sparse.csr_matrix")
 
@@ -90,28 +115,44 @@ class PropagationVarianceAnalyzer:
         self.gdc_exact        = gdc_exact
         self.sgc_k            = sgc_k
         self.cheb_k           = cheb_k
-        self.cheb_theta       = (
-            cheb_theta
-            if cheb_theta is not None
-            else np.ones(self.cheb_k + 1) / (self.cheb_k + 1)
-        )
         self.gpr_k            = gpr_k
-        self.gpr_theta        = (
-            gpr_theta
-            if gpr_theta is not None
-            else np.ones(self.gpr_k + 1) / (self.gpr_k + 1)
-        )
         self.jacobi_iters     = jacobi_iters
         self.jacobi_alpha     = jacobi_alpha
         self.s2gc_k           = s2gc_k
         self.s2gc_alpha       = s2gc_alpha
 
+        cheb_theta = (
+            np.asarray(cheb_theta, dtype=float)
+            if cheb_theta is not None
+            else np.ones(self.cheb_k + 1, dtype=float) / (self.cheb_k + 1)
+        )
+        if cheb_theta.shape[0] != self.cheb_k + 1:
+            raise ValueError(
+                "cheb_theta must have length cheb_k + 1 "
+                f"({self.cheb_k + 1}), got {cheb_theta.shape[0]}"
+            )
+        self.cheb_theta = cheb_theta
+
+        gpr_theta = (
+            np.asarray(gpr_theta, dtype=float)
+            if gpr_theta is not None
+            else np.ones(self.gpr_k + 1, dtype=float) / (self.gpr_k + 1)
+        )
+        if gpr_theta.shape[0] != self.gpr_k + 1:
+            raise ValueError(
+                "gpr_theta must have length gpr_k + 1 "
+                f"({self.gpr_k + 1}), got {gpr_theta.shape[0]}"
+            )
+        self.gpr_theta = gpr_theta
+
         if self.gdc_spars_method not in {'topk', 'threshold'}:
             raise ValueError("gdc_spars_method must be 'topk' or 'threshold'")
-        self.gdc_method = gdc_method
+        self.gdc_method = gdc_method.lower()
+        if self.gdc_method not in {'ppr', 'heat'}:
+            raise ValueError("gdc_method must be 'ppr' or 'heat'")
 
         # Cache for propagation matrices
-        self._cache = {}
+        self._cache: Dict[str, csr_matrix] = {}
 
     def _prop_gcn(self) -> csr_matrix:
         """Symmetric normalization propagation with self-loops (GCN)."""
@@ -122,28 +163,33 @@ class PropagationVarianceAnalyzer:
             improved=False,
             add_self_loops=True
         )
-        return to_scipy_sparse_matrix(edge_index, edge_weight, num_nodes=self.A.shape[0])
+        return to_scipy_sparse_matrix(
+            edge_index, edge_weight, num_nodes=self.A.shape[0]
+        ).tocsr()
 
     def _prop_appnp(self) -> csr_matrix:
         """Approximate personalized propagation of neural predictions (APPNP)."""
         row_sums = np.array(self.A.sum(axis=1)).flatten()
         row_sums[row_sums == 0] = 1
         P = diags(1.0 / row_sums) @ self.A
-        M = P.multiply(1 - self.appnp_alpha)
+        transition = (1.0 - self.appnp_alpha) * P
         N = self.A.shape[0]
-        S = identity(N, format='csr') * self.appnp_alpha
+        S = self.appnp_alpha * identity(N, format='csr')
         M_power = identity(N, format='csr')
-        for _ in range(1, self.appnp_k):
-            M_power = M @ M_power
+        for _ in range(self.appnp_k):
+            M_power = transition @ M_power
             S += self.appnp_alpha * M_power
-        S += M @ M_power
-        return S
+        return S.tocsr()
 
     def _prop_gdc(self) -> csr_matrix:
         """Graph diffusion convolution (GDC) with PPR or heat diffusion."""
         N = self.A.shape[0]
         # diffusion kwargs
-        diff_kwargs = {'method': 'heat', 't': self.heat_t} if self.gdc_method == 'heat' else {'method': 'ppr', 'alpha': self.alpha}
+        diff_kwargs = (
+            {'method': 'heat', 't': self.heat_t}
+            if self.gdc_method == 'heat'
+            else {'method': 'ppr', 'alpha': self.alpha}
+        )
         # sparsification kwargs
         if self.gdc_spars_method == 'topk':
             spars_kwargs = {'method': 'topk', 'k': self.gdc_avg_degree, 'dim': 0}
@@ -155,12 +201,13 @@ class PropagationVarianceAnalyzer:
             normalization_in='sym',
             normalization_out='col',
             diffusion_kwargs=diff_kwargs,
-            sparsification_kwargs=spars_kwargs
+            sparsification_kwargs=spars_kwargs,
+            exact=self.gdc_exact,
         )
         data_gdc = transform(self.data)
         return to_scipy_sparse_matrix(
             data_gdc.edge_index,
-            data_gdc.edge_attr,
+            getattr(data_gdc, 'edge_attr', None),
             num_nodes=N
         ).tocsr()
 
@@ -175,7 +222,7 @@ class PropagationVarianceAnalyzer:
         M = norm_A
         for _ in range(1, self.sgc_k):
             M = M @ norm_A
-        return M
+        return M.tocsr()
 
     def _prop_chebnetii(self) -> csr_matrix:
         """Chebyshev spectral graph convolution (ChebNet II)."""
@@ -192,7 +239,7 @@ class PropagationVarianceAnalyzer:
             Tk_xj = np.cos(k * np.arccos(xj))
             w_k = 2.0 / (self.cheb_k + 1) * (self.cheb_theta * Tk_xj).sum()
             S += w_k * T_k
-        return S
+        return S.tocsr()
 
     def _prop_gprgnn(self) -> csr_matrix:
         """Generalized PageRank neural network (GPRGNN)."""
@@ -205,7 +252,7 @@ class PropagationVarianceAnalyzer:
         for k in range(self.gpr_k + 1):
             S += self.gpr_theta[k] * P_power
             P_power = P @ P_power
-        return S
+        return S.tocsr()
 
     def _prop_jacobiconv(self) -> csr_matrix:
         """Jacobi-based propagation (JacobiConv)."""
@@ -219,7 +266,7 @@ class PropagationVarianceAnalyzer:
         for _ in range(self.jacobi_iters):
             M_power = M @ M_power
             S += M_power
-        return S
+        return S.tocsr()
 
     def _prop_s2gc(self) -> csr_matrix:
         """Second-order graph convolution (S2GC)."""
@@ -234,9 +281,9 @@ class PropagationVarianceAnalyzer:
         for _ in range(self.s2gc_k):
             M_power = norm_A @ M_power
             S += (1.0 - self.s2gc_alpha) / self.s2gc_k * M_power
-        return S
+        return S.tocsr()
 
-    def compute_variance(self, method: str = None) -> float:
+    def compute_variance(self, method: Optional[str] = None) -> float:
         """Compute variance of the propagation matrix without densification."""
         m = (method or self.method).lower()
         if m == 'all':
@@ -254,6 +301,6 @@ class PropagationVarianceAnalyzer:
         mean_sq = sum_sq / N2
         return mean_sq - mean ** 2
 
-    def compute_all(self) -> dict:
+    def compute_all(self) -> Dict[str, float]:
         """Compute variances for all supported propagation methods."""
         return {m: self.compute_variance(m) for m in self.SUPPORTED if m != 'all'}
