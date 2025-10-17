@@ -235,7 +235,7 @@ class ChanCapConEst:
                 phi0 = self.effective_capacity(w)
                 print("\n=== C3E (feasible) ===")
                 print(f"L={L}\nwidths: {w.tolist()} (rounded {rounded})")
-                print(f"φ (Eq.9): {phi:.6f} | φ₀ (Eq.11): {phi0:.6f} in [{H:.6f}, {(H/self.eta):.6f}]")
+                print(f"φ: {phi:.6f} | φ₀: {phi0:.6f} in [{H:.6f}, {(H/self.eta):.6f}]")
                 print(f"dropouts: {drops}")
 
             all_rounded.append(rounded)
