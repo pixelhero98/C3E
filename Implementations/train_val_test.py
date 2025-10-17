@@ -38,11 +38,25 @@ from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
 from torch_geometric.data import Data
 from tqdm import tqdm
 
+
+# Ensure local modules (Implementations, Model_factory, Visualizations, ...) are importable
+REPO_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = REPO_ROOT.parent
+for path in (PROJECT_ROOT, REPO_ROOT):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
+
 from Model_factory.model import Model
 from Visualizations.entropy_energy import dirichlet_energy, representation_entropy
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
 from utility import create_masks, save_checkpoint, test, train, val
+
+
+CONV_METHOD_ALIASES = {
+    'jacobiconv': 'jacobi',
+}
 
 
 def set_seed(seed: int) -> None:
@@ -127,12 +141,14 @@ def run_solution(
     sol_dir = args.save_dir / f"sol_{channel_str}"
     sol_dir.mkdir(parents=True, exist_ok=True)
 
+    conv_method = CONV_METHOD_ALIASES.get(args.prop_method, args.prop_method)
+
     model = Model(
         prop_layer=[data.x.shape[1]] + prop_layer_sizes,
         num_class=dataset.num_classes,
         drop_probs=drop_probs,
         use_activations=[True] * len(prop_layer_sizes),
-        conv_methods=args.prop_method
+        conv_methods=conv_method
     ).to(args.device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -230,24 +246,47 @@ def main() -> None:
     checkpoint_paths: List[Path] = []
     data = dataset[0]
     num_nodes = data.x.size(0)
-    H = np.log(num_nodes)
-    sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
+    if num_nodes <= 0:
+        logging.error("Dataset contains no nodes; cannot proceed with training.")
+        return
+
+    H = float(np.log(num_nodes))
+    sigma_s = float(PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance())
+    sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
     try:
         solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
     except RuntimeError as exc:
         logging.error("Channel capacity optimisation failed: %s", exc)
         return
 
-    if len(solutions) < 3:
+    if len(solutions) != 3:
         logging.error("Unexpected solution structure returned by optimiser: %s", solutions)
         return
 
-    if not all(len(part) for part in solutions[:3]):
+    rounded_layers, dropout_schedules, channel_caps = solutions
+
+    if not (rounded_layers and dropout_schedules and channel_caps):
         logging.error("Optimiser returned empty solution components: %s", solutions)
         return
 
+    if not (len(rounded_layers) == len(dropout_schedules) == len(channel_caps)):
+        logging.error(
+            "Optimiser produced mismatched component lengths: %s", {
+                'layers': len(rounded_layers),
+                'dropout': len(dropout_schedules),
+                'capacity': len(channel_caps),
+            }
+        )
+        return
+
     if args.dataset not in {'ogbn-arxiv','ogbn-papers100M'}:
-        data.train_mask, data.val_mask, data.test_mask = create_masks(data, args.train_per_class, args.num_val, args.num_test, seed=args.seed)
+        data.train_mask, data.val_mask, data.test_mask = create_masks(
+            data,
+            args.train_per_class,
+            args.num_val,
+            args.num_test,
+            seed=args.seed,
+        )
     else:
         split_idx = dataset.get_idx_split()
         train_idx, valid_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
@@ -259,7 +298,7 @@ def main() -> None:
         data.test_mask[test_idx] = True
         
     data = data.to(args.device)
-    for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
+    for layers, dropout, channel_capacity in zip(rounded_layers, dropout_schedules, channel_caps):
         test_acc, checkpoint = run_solution(data, dataset, layers, dropout, channel_capacity, args)
         results.append(test_acc)
         checkpoint_paths.append(checkpoint)
@@ -269,9 +308,9 @@ def main() -> None:
         return
 
     opt_result_index = max(range(len(results)), key=results.__getitem__)
-    best_layers = solutions[0][opt_result_index]
-    best_dropouts = solutions[1][opt_result_index]
-    best_capacity = solutions[-1][opt_result_index]
+    best_layers = rounded_layers[opt_result_index]
+    best_dropouts = dropout_schedules[opt_result_index]
+    best_capacity = channel_caps[opt_result_index]
     best_performance = results[opt_result_index]
     best_checkpoint = checkpoint_paths[opt_result_index]
 
