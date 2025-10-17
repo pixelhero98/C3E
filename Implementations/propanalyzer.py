@@ -107,6 +107,11 @@ class PropagationVarianceAnalyzer:
         else:
             raise TypeError("`data` must be a PyG Data or scipy.sparse.csr_matrix")
 
+        # Ensure cached Data lives on CPU to avoid unwanted host/device transfers
+        self.data = self.data.clone()
+        if hasattr(self.data, "to"):
+            self.data = self.data.to('cpu')
+
         # Store parameters
         self.appnp_k          = appnp_k
         self.appnp_alpha      = appnp_alpha
@@ -207,7 +212,7 @@ class PropagationVarianceAnalyzer:
             sparsification_kwargs=spars_kwargs,
             exact=self.gdc_exact,
         )
-        data_gdc = transform(self.data)
+        data_gdc = transform(self.data.clone())
         return to_scipy_sparse_matrix(
             data_gdc.edge_index,
             getattr(data_gdc, 'edge_attr', None),

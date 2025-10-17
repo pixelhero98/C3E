@@ -27,7 +27,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -125,6 +125,10 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
+def _format_layers(layers: Iterable[int]) -> str:
+    return "-".join(str(int(l)) for l in layers)
+
+
 def run_solution(
     data: Data,
     dataset,
@@ -156,7 +160,7 @@ def run_solution(
         optimizer, mode='max', patience=20
     )
 
-    best_val, best_test = 0.0, 0.0
+    best_val, best_test = float("-inf"), 0.0
     best_checkpoint: Optional[Path] = None
     epochs_no_improve = 0
     logging.info("Starting training for solution: layers=%s, dropout=%s", prop_layer_sizes, drop_probs)
@@ -186,7 +190,7 @@ def run_solution(
                 epochs_no_improve = 0
                 best_checkpoint = save_checkpoint(
                     sol_dir=sol_dir,
-                    layer_str=channel_str,
+                    layer_str=_format_layers(prop_layer_sizes),
                     epoch=epoch,
                     model=model,
                     optimizer=optimizer,
