@@ -22,7 +22,7 @@ class ChanCapConEst:
             data: object with at least .x (shape: [N, M]).
                   If available, .d (avg degree) or .num_edges is used to estimate degree.
             eta:  regularizer in (0, 1]; controls the φ₀ window's upper bound (1/η) ln n.
-            sigma_s: scalar or sequence for σ_{S_l}^2. If None -> fallback 1/d (your rule).
+            sigma_s: scalar or sequence for σ_{S_l}^2. If None -> fallback 1/d (null approximation).
         """
         if not (0.0 < float(eta) <= 1.0):
             raise ValueError("eta must be in (0, 1].")
