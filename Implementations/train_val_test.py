@@ -22,24 +22,27 @@ Example usage:
         --device cuda
 """
 
-import random
 import argparse
-import sys
 import logging
+import random
+import sys
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
+
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
-from utility import create_masks 
-from pathlib import Path
-from torch_geometric.datasets import Planetoid, WikipediaNetwork, Amazon
 from ogb.nodeproppred import PygNodePropPredDataset
+from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
+from torch_geometric.data import Data
 from tqdm import tqdm
+
 from Model_factory.model import Model
+from Visualizations.entropy_energy import dirichlet_energy, representation_entropy
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
-from utility import train, val, test, save_checkpoint
-from Visualizations.entropy_energy import representation_entropy, dirichlet_energy
+from utility import create_masks, save_checkpoint, test, train, val
 
 
 def set_seed(seed: int) -> None:
@@ -93,6 +96,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def setup_logging(save_dir: Path) -> None:
+    """Initialise file and console logging in ``save_dir``."""
+
     save_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         filename=save_dir / 'training.log',
@@ -106,12 +111,21 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
-def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: float, args) -> None:
-    prop_layer_sizes = layers
-    drop_probs = dropout
+def run_solution(
+    data: Data,
+    dataset,
+    layers: Sequence[int],
+    dropout: Sequence[float],
+    channel_capacity: float,
+    args: argparse.Namespace
+) -> Tuple[float, Path]:
+    """Train a candidate architecture and return the best test accuracy and checkpoint path."""
+
+    prop_layer_sizes = list(layers)
+    drop_probs = list(dropout)
     channel_str = f"{channel_capacity:.6g}".replace('.', 'p')
     sol_dir = args.save_dir / f"sol_{channel_str}"
-    sol_dir.mkdir(exist_ok=True)
+    sol_dir.mkdir(parents=True, exist_ok=True)
 
     model = Model(
         prop_layer=[data.x.shape[1]] + prop_layer_sizes,
@@ -123,32 +137,38 @@ def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: f
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', patience=20)
+        optimizer, mode='max', patience=20
+    )
 
     best_val, best_test = 0.0, 0.0
+    best_checkpoint: Optional[Path] = None
     epochs_no_improve = 0
-    logging.info(f"Starting training for solution: layers={prop_layer_sizes}, dropout={drop_probs}")
+    logging.info("Starting training for solution: layers=%s, dropout=%s", prop_layer_sizes, drop_probs)
 
     try:
         for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {channel_str}", file=sys.stdout):
             loss = train(model, data, optimizer)
             val_acc = val(model, data)
             test_acc = test(model, data)
-            if test_acc > best_test:
-                best_test = test_acc
-                
+            best_test = max(best_test, test_acc)
+
             scheduler.step(val_acc)
 
-            # Logging with learning rate
             if epoch % 10 == 0 or epoch == 1:
                 current_lr = optimizer.param_groups[0]['lr']
-                logging.info(f"Epoch {epoch}/{args.epochs} - loss: {loss:.4f}, val_acc: {val_acc:.4f}, lr: {current_lr:.2e}")
+                logging.info(
+                    "Epoch %d/%d - loss: %.4f, val_acc: %.4f, lr: %.2e",
+                    epoch,
+                    args.epochs,
+                    loss,
+                    val_acc,
+                    current_lr,
+                )
 
-            # Early stopping & checkpointing
             if val_acc > best_val:
                 best_val = val_acc
                 epochs_no_improve = 0
-                save_checkpoint(
+                best_checkpoint = save_checkpoint(
                     sol_dir=sol_dir,
                     layer_str=channel_str,
                     epoch=epoch,
@@ -157,27 +177,39 @@ def run_solution(data, dataset, layers: list, dropout: list, channel_capacity: f
                     scheduler=scheduler,
                     best_val=best_val,
                     layer_sizes=prop_layer_sizes,
-                    dropout=drop_probs
+                    dropout=drop_probs,
                 )
             else:
                 epochs_no_improve += 1
 
             if epochs_no_improve >= args.patience:
-                logging.info(f"No improvement for {args.patience} epochs. Early stopping.")
+                logging.info("No improvement for %d epochs. Early stopping.", args.patience)
                 break
-            
-        logging.info(f"Solution:{prop_layer_sizes}, Network Channel Capacity:{channel_capacity}, best_val={best_val:.4f}, best_test_acc={best_test:.4f}")
-        # print(f"Solution: Hidden dimensions:{prop_layer_sizes} / Dropout probabilities:{drop_probs}: best_val={best_val:.4f}, best_test={best_test:.4f}")
 
-    except Exception as e:
-        logging.error(f"Error in solution {channel_str}: {e}", exc_info=True)
+        logging.info(
+            "Solution: %s | Channel Capacity: %.4f | best_val=%.4f | best_test=%.4f",
+            prop_layer_sizes,
+            channel_capacity,
+            best_val,
+            best_test,
+        )
+
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging.error("Error in solution %s: %s", channel_str, exc, exc_info=True)
 
     finally:
-        # Clean up to free GPU memory
         del model, optimizer, scheduler
-        torch.cuda.empty_cache()
-        
-    return best_test, sol_dir
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if best_checkpoint is None:
+        checkpoints = sorted(sol_dir.glob('best_val_*.pt'))
+        if checkpoints:
+            best_checkpoint = checkpoints[-1]
+        else:
+            raise RuntimeError(f"No checkpoints saved for solution {channel_str}.")
+
+    return best_test, best_checkpoint
 
 def main() -> None:
     args = parse_args()
@@ -194,12 +226,25 @@ def main() -> None:
     else:
         dataset = PygNodePropPredDataset(name=args.dataset, transform=T.AddSelfLoops())
 
-    results, sol_dirs = [], []
+    results: List[float] = []
+    checkpoint_paths: List[Path] = []
     data = dataset[0]
     num_nodes = data.x.size(0)
     H = np.log(num_nodes)
     sigma_s = PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance()
-    solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
+    try:
+        solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
+    except RuntimeError as exc:
+        logging.error("Channel capacity optimisation failed: %s", exc)
+        return
+
+    if len(solutions) < 3:
+        logging.error("Unexpected solution structure returned by optimiser: %s", solutions)
+        return
+
+    if not all(len(part) for part in solutions[:3]):
+        logging.error("Optimiser returned empty solution components: %s", solutions)
+        return
 
     if args.dataset not in {'ogbn-arxiv','ogbn-papers100M'}:
         data.train_mask, data.val_mask, data.test_mask = create_masks(data, args.train_per_class, args.num_val, args.num_test, seed=args.seed)
@@ -214,16 +259,59 @@ def main() -> None:
         data.test_mask[test_idx] = True
         
     data = data.to(args.device)
-    # Iterate solutions safely
     for layers, dropout, channel_capacity in zip(solutions[0], solutions[1], solutions[-1]):
-        res, sols = run_solution(data, dataset, layers, dropout, channel_capacity, args)
-        results.append(res)
-        sol_dirs.append(sols)
+        test_acc, checkpoint = run_solution(data, dataset, layers, dropout, channel_capacity, args)
+        results.append(test_acc)
+        checkpoint_paths.append(checkpoint)
 
-    opt_result_index = results.index(max(results))
-    print(f"Optimal hidden dimensions:{solutions[0][opt_result_index]}, Dropout probabilities:{solutions[1][opt_result_index]}, Network Channel Capacity:{solutions[-1][opt_result_index]}, Performance:{max(results)}")
-    rep_entropy = representation_entropy(sol_dirs[opt_result_index], args.device, solutions[0][opt_result_index], dataset.num_classes, solutions[1][opt_result_index], [True] * solutions[0][opt_result_index], args.prop_method, data, nbins=2000)
-    rep_energy = dirichlet_energy(sol_dirs[opt_result_index], args.device, solutions[0][opt_result_index], dataset.num_classes, solutions[1][opt_result_index], [True] * solutions[0][opt_result_index], args.prop_method, data, normalized=True)
+    if not results:
+        logging.error("No feasible solutions were trained.")
+        return
+
+    opt_result_index = max(range(len(results)), key=results.__getitem__)
+    best_layers = solutions[0][opt_result_index]
+    best_dropouts = solutions[1][opt_result_index]
+    best_capacity = solutions[-1][opt_result_index]
+    best_performance = results[opt_result_index]
+    best_checkpoint = checkpoint_paths[opt_result_index]
+
+    print(
+        "Optimal hidden dimensions:{}, Dropout probabilities:{}, Network Channel Capacity:{:.4f}, Performance:{:.4f}".format(
+            best_layers,
+            best_dropouts,
+            best_capacity,
+            best_performance,
+        )
+    )
+
+    use_activations = [True] * len(best_layers)
+    prop_layers = [data.x.shape[1]] + best_layers
+
+    rep_entropy = representation_entropy(
+        best_checkpoint,
+        args.device,
+        prop_layers,
+        dataset.num_classes,
+        best_dropouts,
+        use_activations,
+        args.prop_method,
+        data,
+        nbins=2000,
+    )
+    rep_energy = dirichlet_energy(
+        best_checkpoint,
+        args.device,
+        prop_layers,
+        dataset.num_classes,
+        best_dropouts,
+        use_activations,
+        args.prop_method,
+        data,
+        normalized=True,
+    )
+
+    logging.info("Representation entropy: %.6f", rep_entropy)
+    logging.info("Dirichlet energy: %.6f", rep_energy)
     
 if __name__ == '__main__':
     main()
