@@ -25,7 +25,7 @@ class ChanCapConEst:
         self.data = data
         self.N, self.M = data.x.shape
         self.d = data.num_edges / self.N
-        self.penalty = 1e5
+        self.penalty = 1e6
         self.sigma_s = sigma_s
         self.eta = eta
 
