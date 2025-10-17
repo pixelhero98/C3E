@@ -105,20 +105,28 @@ class ChanCapConEst:
 
     def effective_capacity(self, w: np.ndarray) -> float:
         """
-        φ₀ = Σ_l ln((w_{l-1} w_l)/(w_{l-1}+w_l)) *
-             [ ln(2πe) + Σ_{o=1..l} ln(n w_{o-1} σ_{S_o}^2) ] / ln(n w_{l-1} σ_{S_l}^2).  (Eq. 11)
+        If σ_S^2 is scalar (or None → single value), use 1/l scaling in front of log-HM.
+        Otherwise use the exact Eq. (11) with the ratio DEN / NUM.
         """
         L = w.size
+        prev = np.concatenate(([self.M], w[:-1]))              # w_{l-1}
+        hm_logs = np.log((prev * w) / (prev + w))              # ln((w_{l-1} w_l)/(w_{l-1}+w_l))
+    
+        # Case 1: all-layer-same σ^2  →  scale by 1/l
+        if (self.sigma_s is None or np.isscalar(self.sigma_s) or
+            (np.ndim(self.sigma_s) == 1 and np.atleast_1d(self.sigma_s).size == 1)):
+            scale = 1.0 / np.arange(1, L + 1, dtype=float)
+            return float(np.sum(hm_logs * scale))
+    
+        # Case 2: layer-varying σ^2  →  exact Eq. (11)
         sigma2 = self._sigma2(L)
-        prev = np.concatenate(([self.M], w[:-1]))
-        layer_logs = np.log(self.N) + np.log(prev) + np.log(sigma2)   # ln(n w_{l-1} σ^2)
-        cum_logs = np.cumsum(layer_logs)
-        numer_caps = np.log(2.0 * np.pi * np.e) + cum_logs
-        harm_logs = np.log((prev * w) / (prev + w))                   # ln HM term
-
+        den_logs = np.log(self.N) + np.log(prev) + np.log(sigma2)   # ln(n w_{l-1} σ_{S_l}^2)  (DEN)
+        num_caps = np.log(2.0 * np.pi * np.e) + np.cumsum(den_logs) # ln(2πe) + Σ_{o≤l} ln(n w_{o-1} σ_{S_o}^2) (NUM)
+    
         with np.errstate(divide="ignore", invalid="ignore"):
-            per = harm_logs * (numer_caps / layer_logs)
+            per = hm_logs * (den_logs / num_caps)                   # <-- DEN / NUM (correct)
             per[~np.isfinite(per)] = -np.inf
+    
         return float(np.sum(per))
 
     # -------------------------
