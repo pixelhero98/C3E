@@ -32,9 +32,15 @@ class ChanCapConEst:
     def dropouts(self, layers: Sequence[float]) -> List[float]:
         """Compute dropout probabilities between successive layers."""
         widths = np.array(layers, dtype=float)
+        if widths.size == 0:
+            return []
+
         widths = np.insert(widths, 0, self.M)
         harmonic = (widths[:-1] * widths[1:]) / (widths[:-1] + widths[1:])
-        return (1.0 - harmonic / widths[1:]).tolist()
+        dropouts = 1.0 - harmonic / widths[1:]
+        # Numerical jitter can push values slightly outside [0, 1]; guard against it.
+        dropouts = np.clip(dropouts, 0.0, 1.0)
+        return dropouts.tolist()
 
     def rep_compression_ratio(self, layers: Sequence[float], channel_capacity: float) -> float:
         """Compute channel capacity divided by the geometric mean of hidden dimensions."""
@@ -197,7 +203,9 @@ class ChanCapConEst:
         
         for L in range(2, max_layers + 1):
             w0 = np.full(L, 2.0)
-            upper = (self.N - 1) * self.M
+            upper = max(float(self.M + 1.0), float((self.N - 1) * self.M))
+            if upper <= 2.0:
+                upper = 2.0 + 1.0
             bounds = [(2.0, upper)] * L
             cons = {'type': 'ineq', 'fun': lambda w, H=H: self.constraint(w, H)}
 

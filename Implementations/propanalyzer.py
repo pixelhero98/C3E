@@ -14,6 +14,9 @@ from torch_geometric.utils import (
 )
 
 
+EPS = np.finfo(np.float64).eps
+
+
 def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
     """Compute scaled Laplacian."""
     row_sums = np.array(A_csr.sum(axis=1)).flatten()
@@ -229,14 +232,15 @@ class PropagationVarianceAnalyzer:
         L_tilde = scaled_laplacian(self.A)
         N = self.A.shape[0]
         j = np.arange(self.cheb_k + 1)
-        xj = np.cos((2*j + 1) * np.pi / (2*(self.cheb_k + 1)))
+        xj = np.cos((2 * j + 1) * np.pi / (2 * (self.cheb_k + 1)))
+        angles = np.arccos(xj)
         T_prev, T_curr = identity(N, format='csr'), L_tilde
         S = csr_matrix((N, N))
         for k in range(self.cheb_k + 1):
             T_k = T_prev if k == 0 else (T_curr if k == 1 else 2 * L_tilde @ T_curr - T_prev)
             if k > 1:
                 T_prev, T_curr = T_curr, T_k
-            Tk_xj = np.cos(k * np.arccos(xj))
+            Tk_xj = np.cos(k * angles)
             w_k = 2.0 / (self.cheb_k + 1) * (self.cheb_theta * Tk_xj).sum()
             S += w_k * T_k
         return S.tocsr()
@@ -299,7 +303,10 @@ class PropagationVarianceAnalyzer:
         N2 = n * n
         mean = total / N2
         mean_sq = sum_sq / N2
-        return mean_sq - mean ** 2
+        variance = mean_sq - mean ** 2
+        if variance < 0:
+            variance = 0.0
+        return float(max(variance, EPS))
 
     def compute_all(self) -> Dict[str, float]:
         """Compute variances for all supported propagation methods."""
