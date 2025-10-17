@@ -38,14 +38,21 @@ def create_masks(
     Returns:
         train_mask, val_mask, test_mask (Tensor[bool], each of shape [num_nodes])
     """
-    if seed is not None:
-        torch.manual_seed(seed)
+    if train_per_class <= 0 or num_val < 0 or num_test < 0:
+        raise ValueError("train_per_class must be > 0 and num_val/num_test must be >= 0")
 
     # 1) get labels & num_classes
     y = labels if labels is not None else data.y
     y = y.view(-1)
     if num_classes is None:
         num_classes = int(y.max().item()) + 1
+
+    if seed is not None:
+        device = y.device if y.is_cuda else torch.device('cpu')
+        generator = torch.Generator(device=device)
+        generator.manual_seed(seed)
+    else:
+        generator = None
 
     N = y.size(0)
     train_mask = torch.zeros(N, dtype=torch.bool)
@@ -60,12 +67,12 @@ def create_masks(
                 f"Class {c} has only {idx_c.numel()} samples, "
                 f"but you requested {train_per_class}"
             )
-        perm = idx_c[torch.randperm(idx_c.size(0))]
+        perm = idx_c[torch.randperm(idx_c.size(0), generator=generator, device=idx_c.device)]
         train_mask[perm[:train_per_class]] = True
 
     # 3) split the rest into val & test
     rem = (~train_mask).nonzero(as_tuple=False).view(-1)
-    rem = rem[torch.randperm(rem.size(0))]
+    rem = rem[torch.randperm(rem.size(0), generator=generator, device=rem.device)]
     if rem.numel() < (num_val + num_test):
         raise ValueError(
             f"Not enough remaining samples ({rem.numel()}) for "
@@ -323,6 +330,9 @@ def vector_mean(rep: torch.Tensor) -> torch.Tensor:
 
 def vector_variance(rep: torch.Tensor) -> torch.Tensor:
     """Variance (unbiased) over the node dimension."""
+    if rep.size(0) <= 1:
+        shape = rep.shape[1:]
+        return torch.zeros(shape, dtype=rep.dtype, device=rep.device)
     return rep.var(dim=0, unbiased=True)
 
 def mean_activation_per_layer(reps):

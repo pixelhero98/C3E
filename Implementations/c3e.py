@@ -1,6 +1,6 @@
 """C3E channel capacity constrained estimator implementation."""
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.optimize import minimize
@@ -10,24 +10,44 @@ __all__ = ["ChanCapConEst"]
 
 TINY = 1e-12
 
+
+def _as_positive_array(values: Iterable[float]) -> np.ndarray:
+    """Return *values* as a strictly positive 1-D ``float`` array."""
+
+    arr = np.asarray(list(values), dtype=float).ravel()
+    if arr.size == 0:
+        return arr
+    if np.any(~np.isfinite(arr)) or np.any(arr <= 0):
+        raise ValueError("Layer widths must be positive and finite.")
+    return arr
+
+
 class ChanCapConEst:
     """
     Estimate propagation layers and their hidden dimensions for a graph neural network with C3E.
     """
 
-    def __init__(self, data, eta, sigma_s: Optional[np.ndarray] = None) -> None:
+    def __init__(self, data, eta: float, sigma_s: Optional[np.ndarray] = None) -> None:
         """
         :param data: Graph data object with attributes:
                      - x: node feature matrix of shape (N, M)
                      - num_edges: total number of edges
         :param sigma_s: optional per-layer propagation matrix variance scales array
         """
+        if not hasattr(data, "x") or not hasattr(data, "num_edges"):
+            raise TypeError("data must expose 'x' (features) and 'num_edges' attributes")
+
         self.data = data
-        self.N, self.M = data.x.shape
-        self.d = data.num_edges / self.N
+        self.N, self.M = map(int, data.x.shape)
+        if self.N <= 0 or self.M <= 0:
+            raise ValueError("Graph data must contain at least one node and one feature.")
+
+        self.d = float(data.num_edges) / float(self.N)
         self.penalty = 1e6
         self.sigma_s = sigma_s
-        self.eta = eta
+        if eta <= 0:
+            raise ValueError("eta must be strictly positive to form a valid constraint window.")
+        self.eta = float(eta)
 
     def dropouts(self, layers: Sequence[float]) -> List[float]:
         """Compute dropout probabilities between successive layers."""
@@ -36,6 +56,8 @@ class ChanCapConEst:
             return []
 
         widths = np.insert(widths, 0, self.M)
+        if np.any(widths <= 0):
+            raise ValueError("Layer widths must remain strictly positive.")
         harmonic = (widths[:-1] * widths[1:]) / (widths[:-1] + widths[1:])
         dropouts = 1.0 - harmonic / widths[1:]
         # Numerical jitter can push values slightly outside [0, 1]; guard against it.
@@ -44,8 +66,13 @@ class ChanCapConEst:
 
     def rep_compression_ratio(self, layers: Sequence[float], channel_capacity: float) -> float:
         """Compute channel capacity divided by the geometric mean of hidden dimensions."""
-        prod = np.prod(np.asarray(layers, dtype=float))
+        widths = np.asarray(layers, dtype=float)
+        if widths.size == 0:
+            return float("inf")
+        prod = np.prod(widths)
         geo_mean = prod ** (1.0 / len(layers))
+        if geo_mean <= 0:
+            raise ValueError("Geometric mean of layer widths must be positive.")
         return channel_capacity / geo_mean
 
     def regularized_feature_dim(self) -> float:
@@ -62,9 +89,13 @@ class ChanCapConEst:
                 raise ValueError("All sigma_s values must be positive and finite.")
             # Use scalar effective sigma: scalar stays scalar; arrays -> geometric mean
             s_eff = float(sig[0]) if sig.size == 1 else float(np.exp(np.mean(np.log(sig + TINY))))
-            return float(self.M * ((1.0 / (s_eff * self.N)) ** (s_eff * self.N)))
-        else:
-            return float(self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else self.M)
+            exponent = -(s_eff * self.N) * np.log(max(s_eff * self.N, TINY))
+            return float(self.M * np.exp(exponent))
+
+        if self.d <= 0:
+            return float(self.M)
+
+        return float(self.M * (self.d ** (1.0 / self.d)))
 
 
     def _layer_variances(self, length: int) -> np.ndarray:
@@ -97,7 +128,10 @@ class ChanCapConEst:
         where w̄ is the geometric mean of widths {w_1..w_L} and
               K = E_ell[ ln(n * sigma_S_ell^2) ].
         """
-        w = np.asarray(w, dtype=float).ravel()
+        try:
+            w = _as_positive_array(w)
+        except ValueError:
+            return True
         L = len(w)
         reg_m = self.regularized_feature_dim()
     
@@ -128,7 +162,13 @@ class ChanCapConEst:
             return self.penalty
 
         # ---- existing φ(w) code remains the same below ----
-        w = np.asarray(w, dtype=float)
+        try:
+            w = _as_positive_array(w)
+        except ValueError:
+            return self.penalty
+        if w.size == 0:
+            return self.penalty
+
         w_ext = np.concatenate(([self.M], w))
         L = len(w)
 
@@ -151,7 +191,13 @@ class ChanCapConEst:
             φ₀ = Σ_{ℓ=1..L} ln( HM(w_{ℓ-1}, w_ℓ) ) * [ ln(n w_{ℓ-1} σ_{S_ℓ}^2) / ( ln(2πe) + Σ_{o=1..ℓ} ln(n w_{o-1} σ_{S_o}^2) ) ]
         with HM(a,b) = ab/(a+b) and w0 = M.
         """
-        w = np.asarray(w, dtype=float)
+        try:
+            w = _as_positive_array(w)
+        except ValueError:
+            return -self.penalty
+        if w.size == 0:
+            raise ValueError("At least one hidden layer is required for the constraint.")
+
         w_ext = np.concatenate(([self.M], w))
         L = len(w)
 
@@ -214,7 +260,8 @@ class ChanCapConEst:
                 x0=w0,
                 method='SLSQP',
                 bounds=bounds,
-                constraints=[cons]
+                constraints=[cons],
+                options={'ftol': 1e-6, 'maxiter': 100},
             )
 
             if not result.success:
