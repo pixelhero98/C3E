@@ -49,34 +49,68 @@ class ChanCapConEst:
         else:
             return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
 
-    def objective(self, w: np.ndarray) -> float:
+    def _violates_strict_guards(self, w: np.ndarray) -> bool:
         """
-        Objective: negative theoretical channel capacity φ(w).
-        φ(w) = 0.5 * [ ln(2πe) + Σ_{ℓ=1..L} ln( n * w_{ℓ-1} * σ_{S_ℓ}^2 ) ], with w0 = M
+        Return True if any strict guard is violated:
+          (i) per-layer width upper bound   w_ell <= reg_m + 1
+         (ii) ln(w̄) > -K
+        (iii) w̄   > exp(1 - K)
+        where w̄ is the geometric mean of widths {w_1..w_L} and
+              K = E_ell[ ln(n * sigma_S_ell^2) ].
         """
-        reg_m = self.regularized_feature_dim()
-        if np.any(w > (reg_m + 1)):
-            return self.penalty  # keep same feasibility guard
-
-        # widths with input prepended (w0 = M)
-        w = np.asarray(w, dtype=float)
-        w_ext = np.concatenate(([self.M], w))
+        w = np.asarray(w, dtype=float).ravel()
         L = len(w)
-
-        # resolve per-layer variances σ_{S_ℓ}^2
+        reg_m = self.regularized_feature_dim()
+    
+        # (i) strict per-layer cap
+        if np.any(w > (reg_m + 1)):
+            return True
+    
+        # K and w̄
+        tiny = 1e-12
+        # per-layer variances σ^2
         if self.sigma_s is None:
-            # default variance = 1/d (as in your previous version)
             d_safe = max(self.d, 1e-12)
             sigma2 = np.full(L, 1.0 / d_safe, dtype=float)
         else:
             s = np.asarray(self.sigma_s, dtype=float).ravel()
             sigma2 = np.full(L, float(s[0]), dtype=float) if s.size == 1 else s[:L]
+    
+        # K = ln n + mean(ln σ^2_ell)
+        K = np.log(self.N + tiny) + np.mean(np.log(sigma2 + tiny))
+    
+        # geometric mean of widths
+        wbar = np.exp(np.mean(np.log(w + tiny)))
+    
+        # (ii) and (iii) guardrails
+        if (np.log(wbar) <= -K) or (wbar <= np.exp(1.0 - K)):
+            return True
+    
+        return False
 
-        # φ(w)
+    
+    def objective(self, w: np.ndarray) -> float:
+        # strict guards (OR of all three): if any trip, penalize
+        if self._violates_strict_guards(w):
+            return self.penalty
+    
+        # ---- existing φ(w) code remains the same below ----
+        w = np.asarray(w, dtype=float)
+        w_ext = np.concatenate(([self.M], w))
+        L = len(w)
+    
+        if self.sigma_s is None:
+            d_safe = max(self.d, 1e-12)
+            sigma2 = np.full(L, 1.0 / d_safe, dtype=float)
+        else:
+            s = np.asarray(self.sigma_s, dtype=float).ravel()
+            sigma2 = np.full(L, float(s[0]), dtype=float) if s.size == 1 else s[:L]
+    
         tiny = 1e-12
         per_layer = np.log(self.N + tiny) + np.log(w_ext[:-1] + tiny) + np.log(sigma2 + tiny)
         phi = 0.5 * (np.log(2.0 * np.pi * np.e) + per_layer.sum())
-        return -phi  # minimize negative capacity
+        return -phi
+
 
     def constraint(self, w: np.ndarray, H: float = 0.0) -> float:
         """
