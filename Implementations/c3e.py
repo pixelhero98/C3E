@@ -1,4 +1,4 @@
-"""Core C3E channel capacity constrained estimator implementation."""
+"""C3E channel capacity constrained estimator implementation."""
 
 from typing import List, Optional, Sequence, Tuple
 
