@@ -1,11 +1,12 @@
-import torch
-import torch.nn.functional as F
-from torch_sparse import SparseTensor
 import logging
 from pathlib import Path
-from torch import nn, optim
+from typing import Optional, Sequence, Tuple, Union
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor, nn, optim
 from torch.optim import lr_scheduler
-from typing import Sequence, Tuple, Optional, Union
+from torch_sparse import SparseTensor
 from torch_geometric.data import Data
 
 
@@ -78,7 +79,7 @@ def create_masks(
 # Ensure your model and data live on the same device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def train(model, data, optimizer):
+def train(model: nn.Module, data: Data, optimizer: optim.Optimizer) -> float:
     """
     Perform one training step on the full graph.
 
@@ -93,12 +94,14 @@ def train(model, data, optimizer):
     model.train()
     optimizer.zero_grad()
     out = model(data)
+    if data.train_mask.sum() == 0:
+        raise ValueError("Training mask is empty; cannot compute loss.")
     loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
     loss.backward()
     optimizer.step()
     return loss.item()
 
-def val(model, data):
+def val(model: nn.Module, data: Data) -> float:
     """
     Compute validation accuracy.
 
@@ -115,9 +118,11 @@ def val(model, data):
         pred = out.argmax(dim=1)
         correct = int((pred[data.val_mask] == data.y[data.val_mask]).sum())
         total = int(data.val_mask.sum())
+    if total == 0:
+        raise ValueError("Validation mask is empty; cannot compute accuracy.")
     return correct / total
 
-def test(model, data):
+def test(model: nn.Module, data: Data) -> float:
     """
     Compute test accuracy.
 
@@ -134,9 +139,11 @@ def test(model, data):
         pred = out.argmax(dim=1)
         correct = int((pred[data.test_mask] == data.y[data.test_mask]).sum())
         total = int(data.test_mask.sum())
+    if total == 0:
+        raise ValueError("Test mask is empty; cannot compute accuracy.")
     return correct / total
     
-def get_model_rep(model, data):
+def get_model_rep(model: nn.Module, data: Data):
     """
     Run a forward pass and collect per-layer outputs separately for
     propagation (conv) and activation layers.
@@ -158,6 +165,11 @@ def get_model_rep(model, data):
         act_reps.append(output.detach().cpu())
 
     # Register hooks
+    if not hasattr(model, "propagation"):
+        raise AttributeError("Model does not define a 'propagation' attribute for convolution layers.")
+    if not hasattr(model, "activations"):
+        raise AttributeError("Model does not define an 'activations' attribute for activation layers.")
+
     for conv in model.propagation:
         hooks.append(conv.register_forward_hook(hook_conv))
     for act in model.activations:
@@ -172,7 +184,7 @@ def get_model_rep(model, data):
 
     return conv_reps, act_reps
 
-def rep_entropy(rep, nbins: int = 5000) -> float:
+def rep_entropy(rep: Tensor, nbins: int = 5000) -> float:
     """
     Estimate Shannon entropy of a flattened tensor by:
       1. Softmax to map values into [0,1]
@@ -181,15 +193,17 @@ def rep_entropy(rep, nbins: int = 5000) -> float:
     """
     rep_flat = rep.view(-1)
     p = F.softmax(rep_flat, dim=0)
+    p_cpu = p.detach().cpu()
 
-    edges = torch.linspace(0.0, 1.0, steps=nbins + 1, device=p.device)
-    bin_idxs = torch.bucketize(p, edges, right=False) - 1
-    counts = torch.bincount(bin_idxs, minlength=nbins).float()
-    probs = counts / counts.sum()
+    counts = torch.histc(p_cpu, bins=nbins, min=0.0, max=1.0)
+    total = counts.sum()
+    if total == 0:
+        return 0.0
+    probs = counts / total
 
     eps = 1e-12
     entropy = -(probs * torch.log(probs + eps)).sum().item()
-    return entropy
+    return float(entropy)
 
 def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     """
@@ -208,34 +222,25 @@ def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
 
     return entropies
 
-def compute_sparse_laplacian(edge_index, num_nodes: int) -> SparseTensor:
+def compute_sparse_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTensor:
     row, col = edge_index
-    N = num_nodes
-    A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    deg = A.sum(dim=1)
-    D = SparseTensor(
-        row=torch.arange(N, device=deg.device),
-        col=torch.arange(N, device=deg.device),
-        value=deg
-    )
-    L = D - A
-    return L
+    values = torch.ones(row.size(0), device=row.device, dtype=torch.float32)
+    adjacency = SparseTensor(row=row, col=col, value=values, sparse_sizes=(num_nodes, num_nodes))
+    deg = adjacency.sum(dim=1)
+    degree_matrix = SparseTensor.diag(deg)
+    return degree_matrix - adjacency
 
-def compute_normalized_laplacian(edge_index, num_nodes: int) -> SparseTensor:
+def compute_normalized_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTensor:
     row, col = edge_index
-    N = num_nodes
-    A = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    deg = A.sum(dim=1)
+    values = torch.ones(row.size(0), device=row.device, dtype=torch.float32)
+    adjacency = SparseTensor(row=row, col=col, value=values, sparse_sizes=(num_nodes, num_nodes))
+    deg = adjacency.sum(dim=1)
     deg_inv_sqrt = deg.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-    D_inv_sqrt = SparseTensor(
-        row=torch.arange(N, device=deg.device),
-        col=torch.arange(N, device=deg.device),
-        value=deg_inv_sqrt
-    )
-    I = SparseTensor.eye(N, device=deg.device)
-    L_sym = I - D_inv_sqrt.matmul(A).matmul(D_inv_sqrt)
-    return L_sym
+    deg_inv_sqrt.masked_fill_(~torch.isfinite(deg_inv_sqrt), 0)
+    deg_inv_sqrt = deg_inv_sqrt.clamp_min(0)
+    d_inv_sqrt = SparseTensor.diag(deg_inv_sqrt)
+    identity = SparseTensor.eye(num_nodes, device=deg.device)
+    return identity - d_inv_sqrt.matmul(adjacency).matmul(d_inv_sqrt)
 
 # New wrapper to switch between Laplacians:
 def compute_laplacian(
@@ -260,6 +265,25 @@ def compute_laplacian(
         return compute_sparse_laplacian(edge_index, num_nodes)
 
 # Updated energy display to accept a choice:
+def compute_dirichlet_energy(rep: Tensor, laplacian: SparseTensor) -> float:
+    r"""Compute Dirichlet energy :math:`\sum_i f_i (Lf)_i` for a representation."""
+    if rep.dim() == 1:
+        rep = rep.unsqueeze(-1)
+
+    laplacian = laplacian.to(rep.device)
+    dtype_attr = getattr(laplacian, "dtype", None)
+    if callable(dtype_attr):
+        dtype = dtype_attr()
+    elif dtype_attr is not None:
+        dtype = dtype_attr
+    else:
+        dtype = rep.dtype
+    rep = rep.to(dtype)
+    rep_laplacian = laplacian.matmul(rep)
+    energy = (rep * rep_laplacian).sum().item()
+    return float(energy)
+
+
 def show_layer_dirichlet_energy(
     conv_reps, act_reps, data: Data,
     normalized: bool = False
@@ -273,17 +297,20 @@ def show_layer_dirichlet_energy(
         data: PyG data object with x and edge_index
         normalized: whether to use the symmetric normalized Laplacian
     """
-    data = data.to(data.x.device)
-    L = compute_laplacian(data.edge_index, data.x.size(0), normalized=normalized)
+    cpu_data = data.to('cpu')
+    laplacian = compute_laplacian(cpu_data.edge_index, cpu_data.x.size(0), normalized=normalized)
 
-    # baseline energy on input features
-    base_energy = compute_dirichlet_energy(data.x, L)
+    base_energy = compute_dirichlet_energy(cpu_data.x, laplacian)
+    if base_energy == 0:
+        logging.warning("Input representation has zero Dirichlet energy; using 1.0 to avoid division by zero.")
+        base_energy = 1.0
+
     energies = {'input': 1.0}
 
     for idx, rep in enumerate(conv_reps, start=1):
-        energies[f'conv_{idx}'] = compute_dirichlet_energy(rep, L) / base_energy
+        energies[f'conv_{idx}'] = compute_dirichlet_energy(rep, laplacian) / base_energy
     for idx, rep in enumerate(act_reps, start=1):
-        energies[f'act_{idx}'] = compute_dirichlet_energy(rep, L) / base_energy
+        energies[f'act_{idx}'] = compute_dirichlet_energy(rep, laplacian) / base_energy
 
     print(energies)
     print('===============================================================')
