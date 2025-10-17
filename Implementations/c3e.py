@@ -45,24 +45,42 @@ class ChanCapConEst:
     def regularized_feature_dim(self) -> float:
         """
         Regularize feature dimension to enable controlled and stable solutions.
+        Returns a scalar even if sigma_s is an array.
         """
         if self.M <= 0:
             raise ValueError("The number of features (M) must be > 0.")
-        elif self.sigma_s is not None:
-            return self.M * ((1.0 / (self.sigma_s * self.N)) ** (self.sigma_s * self.N))
+    
+        if self.sigma_s is not None:
+            sig = np.asarray(self.sigma_s, dtype=float).ravel()
+            if not np.all(np.isfinite(sig)) or np.any(sig <= 0):
+                raise ValueError("All sigma_s values must be positive and finite.")
+            # Use scalar effective sigma: scalar stays scalar; arrays -> geometric mean
+            s_eff = float(sig[0]) if sig.size == 1 else float(np.exp(np.mean(np.log(sig + TINY))))
+            return float(self.M * ((1.0 / (s_eff * self.N)) ** (s_eff * self.N)))
         else:
-            return self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else float(self.M)
+            return float(self.M * (self.d ** (1.0 / self.d)) if self.d > 0 else self.M)
+
 
     def _layer_variances(self, length: int) -> np.ndarray:
         """Return per-layer variance values for the given network depth."""
         if self.sigma_s is None:
             d_safe = max(self.d, TINY)
             return np.full(length, 1.0 / d_safe, dtype=float)
-
+    
         sigma = np.asarray(self.sigma_s, dtype=float).ravel()
+        if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0):
+            raise ValueError("All sigma_s values must be positive and finite.")
+    
         if sigma.size == 1:
             return np.full(length, float(sigma[0]), dtype=float)
+    
+        if sigma.size < length:
+            # pad with the last provided value
+            pad = np.full(length - sigma.size, float(sigma[-1]), dtype=float)
+            return np.concatenate([sigma, pad])
+    
         return sigma[:length]
+
 
     def _violates_strict_guards(self, w: np.ndarray) -> bool:
         """
