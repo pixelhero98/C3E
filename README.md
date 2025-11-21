@@ -1,4 +1,4 @@
-# Channel Capacity Constrained Estimation
+# Channel Capacity Constrained Estimation (arxiv version: https://arxiv.org/abs/2511.06443)
 
 ## Example results (**no graph rewiring, round to the continuous values to the nearest for implementation**)
 
