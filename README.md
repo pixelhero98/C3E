@@ -157,8 +157,3 @@
     * **Rounded hidden dims**: `[5270, 3359, 2798, 2463, 2203, 1477]`
     * **Dropout probabilities**: `[0.5873, 0.3892, 0.4545, 0.4681, 0.4722, 0.4013]`
     </details>
-
-
-
-## Example Usage
-python3 train_val_test.py --dataset CiteSeer --data_root /path/to/data --save_dir /path/to/checkpoints --epochs 300 --lr 1e-3 --weight_decay 1e-4 --eta 0.5 --prop_method gcn
