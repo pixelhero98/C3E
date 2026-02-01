@@ -17,14 +17,33 @@ from torch_geometric.utils import (
 EPS = np.finfo(np.float64).eps
 
 
-def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
-    """Compute scaled Laplacian."""
-    row_sums = np.array(A_csr.sum(axis=1)).flatten()
-    row_sums[row_sums == 0] = 1
-    inv_sqrt = 1.0 / np.sqrt(row_sums)
-    D_inv_sqrt = diags(inv_sqrt)
-    L = identity(A_csr.shape[0], format='csr') - D_inv_sqrt @ A_csr @ D_inv_sqrt
-    return 2 * L - identity(A_csr.shape[0], format='csr')
+def scaled_laplacian(
+    A_csr: csr_matrix,
+    *,
+    lambda_max: float = 2.0,          # ChebNet/ChebNetII common default for normalized Laplacian
+    symmetrize: bool = True,          # ChebNet assumes undirected => symmetric matrices
+    remove_self_loops: bool = True,   # paper defines A as graph adjacency (typically no diagonal)
+) -> csr_matrix:
+    A = A_csr.tocsr()
+
+    if remove_self_loops:
+        A = A.copy()
+        A.setdiag(0)
+        A.eliminate_zeros()
+
+    if symmetrize:
+        A = (A + A.T) * 0.5  # keep weights; ensures symmetry
+
+    deg = np.asarray(A.sum(axis=1)).ravel()
+    deg[deg == 0] = 1.0
+    D_inv_sqrt = diags(1.0 / np.sqrt(deg))
+
+    n = A.shape[0]
+    I = identity(n, format="csr")
+    L = I - (D_inv_sqrt @ A @ D_inv_sqrt)
+
+    # ChebNet definition: L_hat = 2 L / lambda_max - I
+    return (2.0 / float(lambda_max)) * L - I
 
 
 class PropagationVarianceAnalyzer:
@@ -90,6 +109,8 @@ class PropagationVarianceAnalyzer:
             self.A = to_scipy_sparse_matrix(
                 edge_index, edge_weight, num_nodes=data.num_nodes
             ).tocsr()
+            self.A = self.A.copy()
+            self.A.setdiag(0)
             self.data = Data(
                 edge_index=edge_index,
                 edge_weight=edge_weight,
