@@ -233,6 +233,24 @@ def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     return entropies
 
 
+def show_layer_dirichlet_energy(conv_reps, act_reps, data, normalized: bool = True):
+    """
+    Compute Dirichlet energy for input features and each conv and activation layer.
+    """
+    laplacian = compute_laplacian(data.edge_index, data.num_nodes, normalized=normalized)
+    energies = {"input": compute_dirichlet_energy(data.x, laplacian)}
+
+    for idx, rep in enumerate(conv_reps, start=1):
+        energies[f"conv_{idx}"] = compute_dirichlet_energy(rep, laplacian)
+    for idx, rep in enumerate(act_reps, start=1):
+        energies[f"act_{idx}"] = compute_dirichlet_energy(rep, laplacian)
+
+    print(energies)
+    print("===============================================================")
+
+    return energies
+
+
 def compute_sparse_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTensor:
     row, col = edge_index
     values = torch.ones(row.size(0), device=row.device, dtype=torch.float32)

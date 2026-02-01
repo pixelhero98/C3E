@@ -363,8 +363,8 @@ def main() -> None:
         normalized=True,
     )
 
-    logging.info("Representation entropy: %.6f", rep_entropy)
-    logging.info("Dirichlet energy: %.6f", rep_energy)
+    logging.info("Representation entropy: %s", rep_entropy)
+    logging.info("Dirichlet energy: %s", rep_energy)
 
 
 if __name__ == '__main__':
