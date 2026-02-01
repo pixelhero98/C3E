@@ -17,33 +17,14 @@ from torch_geometric.utils import (
 EPS = np.finfo(np.float64).eps
 
 
-def scaled_laplacian(
-    A_csr: csr_matrix,
-    *,
-    lambda_max: float = 2.0,          # ChebNet/ChebNetII common default for normalized Laplacian
-    symmetrize: bool = True,          # ChebNet assumes undirected => symmetric matrices
-    remove_self_loops: bool = True,   # paper defines A as graph adjacency (typically no diagonal)
-) -> csr_matrix:
-    A = A_csr.tocsr()
-
-    if remove_self_loops:
-        A = A.copy()
-        A.setdiag(0)
-        A.eliminate_zeros()
-
-    if symmetrize:
-        A = (A + A.T) * 0.5  # keep weights; ensures symmetry
-
-    deg = np.asarray(A.sum(axis=1)).ravel()
-    deg[deg == 0] = 1.0
-    D_inv_sqrt = diags(1.0 / np.sqrt(deg))
-
-    n = A.shape[0]
-    I = identity(n, format="csr")
-    L = I - (D_inv_sqrt @ A @ D_inv_sqrt)
-
-    # ChebNet definition: L_hat = 2 L / lambda_max - I
-    return (2.0 / float(lambda_max)) * L - I
+def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
+    """Compute scaled Laplacian."""
+    row_sums = np.array(A_csr.sum(axis=1)).flatten()
+    row_sums[row_sums == 0] = 1
+    inv_sqrt = 1.0 / np.sqrt(row_sums)
+    D_inv_sqrt = diags(inv_sqrt)
+    L = identity(A_csr.shape[0], format='csr') - D_inv_sqrt @ A_csr @ D_inv_sqrt
+    return 2 * L - identity(A_csr.shape[0], format='csr')
 
 
 class PropagationVarianceAnalyzer:
@@ -98,7 +79,16 @@ class PropagationVarianceAnalyzer:
             edge_index = data.edge_index
             if edge_index.is_cuda:
                 edge_index = edge_index.cpu()
+            # Prefer explicit edge weights if present; otherwise fall back to
+            # 1-D edge attributes (common for weighted graphs).
             edge_weight = getattr(data, 'edge_weight', None)
+            if edge_weight is None:
+                edge_attr = getattr(data, 'edge_attr', None)
+                if isinstance(edge_attr, torch.Tensor):
+                    if edge_attr.dim() == 1:
+                        edge_weight = edge_attr
+                    elif edge_attr.dim() == 2 and edge_attr.size(1) == 1:
+                        edge_weight = edge_attr.view(-1)
             if edge_weight is None:
                 edge_weight = torch.ones(
                     edge_index.size(1), dtype=torch.float32, device=edge_index.device
@@ -106,22 +96,39 @@ class PropagationVarianceAnalyzer:
             if edge_weight.is_cuda:
                 edge_weight = edge_weight.cpu()
             edge_weight = edge_weight.to(torch.float32)
+            # If the input graph already contains self-loops (e.g. due to a dataset
+            # transform), remove them here. This prevents double-counting when
+            # downstream propagation operators explicitly add self-loops.
+            edge_index, edge_weight = remove_self_loops(edge_index, edge_weight)
+
             self.A = to_scipy_sparse_matrix(
                 edge_index, edge_weight, num_nodes=data.num_nodes
             ).tocsr()
+            # Ensure we truly have no diagonal entries and avoid explicitly stored zeros.
             self.A = self.A.copy()
             self.A.setdiag(0)
+            self.A.eliminate_zeros()
+
+            # Keep a minimal CPU Data object for propagation operators that require
+            # edge_index. Note: GDC uses `edge_attr` while gcn_norm uses `edge_weight`.
             self.data = Data(
                 edge_index=edge_index,
+                edge_attr=edge_weight,
                 edge_weight=edge_weight,
                 num_nodes=data.num_nodes,
             )
         elif isinstance(data, csr_matrix):
-            self.A = data.tocsr()
-            # Reconstruct a minimal PyG Data for methods that need edge_index
+            self.A = data.tocsr().copy()
+            # Remove diagonal entries to keep a consistent definition of adjacency.
+            self.A.setdiag(0)
+            self.A.eliminate_zeros()
+
+            # Reconstruct a minimal PyG Data for methods that need edge_index.
             edge_index, edge_weight = from_scipy_sparse_matrix(self.A)
+            edge_weight = edge_weight.to(torch.float32)
             self.data = Data(
                 edge_index=edge_index,
+                edge_attr=edge_weight,
                 edge_weight=edge_weight,
                 num_nodes=self.A.shape[0],
             )
