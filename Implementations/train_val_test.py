@@ -15,11 +15,8 @@ Example usage:
         --eta 0.7 \
         --patience 50 \
         --prop_method gcn \
-        --seed 123 \
-        --train_per_class 20 \
-        --num_val 500 \
-        --num_test 1000 \
-        --device cuda
+        --seed 123
+
 """
 
 import argparse
@@ -38,36 +35,34 @@ from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
 from torch_geometric.data import Data
 from tqdm import tqdm
 
-
-# Ensure local modules (Implementations, Model_factory, Visualizations, ...) are importable
-REPO_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = REPO_ROOT.parent
-for path in (PROJECT_ROOT, REPO_ROOT):
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
+# Adjust sys.path if needed to import from your project
+sys.path.append(str(Path(__file__).resolve().parent))
 
 from Model_factory.model import Model
-from Visualizations.entropy_energy import dirichlet_energy, representation_entropy
 from c3e import ChanCapConEst
 from propanalyzer import PropagationVarianceAnalyzer
-from utility import create_masks, save_checkpoint, test, train, val
+from utility import create_masks, load_checkpoint, save_checkpoint, test, train, val
+from Visualizations.entropy_energy import dirichlet_energy, representation_entropy
 
 
 CONV_METHOD_ALIASES = {
-    'jacobiconv': 'jacobi',
+    "gcn": "gcn",
+    "appnp": "appnp",
+    "gdc": "gdc",
+    "sgc": "sgc",
+    "chebnetii": "chebnetii",
+    "gprgnn": "gprgnn",
+    "jacobiconv": "jacobiconv",
+    "s2gc": "s2gc",
 }
 
 
 def set_seed(seed: int) -> None:
-    """
-    Set random seeds for reproducibility.
-    """
+    """Set random seed for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed_all(seed)
     cudnn.deterministic = True
     cudnn.benchmark = False
 
@@ -84,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--save_dir', type=Path, default=Path.home() / 'saved',
                         help='Directory to save models and logs')
     parser.add_argument('--dataset', type=str, default='Cora',
-                        choices=['Cora','CiteSeer','PubMed','Chameleon','Squirrel','AmazonPhoto','AmazonComputers'],
+                        choices=['Cora','CiteSeer','PubMed','Chameleon','Squirrel','AmazonPhoto','AmazonComputers','ogbn-arxiv','ogbn-papers100M'],
                         help='Planetoid dataset name')
     parser.add_argument('--epochs', type=int, default=500,
                         help='Maximum number of training epochs')
@@ -105,7 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num_val', type=int, default=500, help='Number of node for validation')
     parser.add_argument('--num_test', type=int, default=1000, help='Number of node for test')
     parser.add_argument('--device', choices=['cpu','cuda'], default='cuda' if torch.cuda.is_available() else 'cpu')
-    
+
     return parser.parse_args()
 
 
@@ -125,7 +120,8 @@ def setup_logging(save_dir: Path) -> None:
     logging.getLogger().addHandler(console)
 
 
-def _format_layers(layers: Iterable[int]) -> str:
+def _format_layers(layers: Sequence[int]) -> str:
+    """Format layer sizes for checkpoint filenames."""
     return "-".join(str(int(l)) for l in layers)
 
 
@@ -136,8 +132,8 @@ def run_solution(
     dropout: Sequence[float],
     channel_capacity: float,
     args: argparse.Namespace
-) -> Tuple[float, Path]:
-    """Train a candidate architecture and return the best test accuracy and checkpoint path."""
+) -> Tuple[float, float, Path]:
+    """Train a candidate architecture and return (best_val_acc, test_acc_at_best_val, checkpoint_path)."""
 
     prop_layer_sizes = list(layers)
     drop_probs = list(dropout)
@@ -155,9 +151,17 @@ def run_solution(
         conv_methods=conv_method
     ).to(args.device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', patience=20
+        optimizer,
+        mode='max',
+        factor=0.5,
+        patience=10,
+        verbose=False,
     )
 
     best_val, best_test = float("-inf"), 0.0
@@ -169,25 +173,21 @@ def run_solution(
         for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {channel_str}", file=sys.stdout):
             loss = train(model, data, optimizer)
             val_acc = val(model, data)
-            test_acc = test(model, data)
-            best_test = max(best_test, test_acc)
 
             scheduler.step(val_acc)
 
             if epoch % 10 == 0 or epoch == 1:
-                current_lr = optimizer.param_groups[0]['lr']
                 logging.info(
-                    "Epoch %d/%d - loss: %.4f, val_acc: %.4f, lr: %.2e",
+                    "Epoch %d | loss=%.4f | val=%.4f",
                     epoch,
-                    args.epochs,
                     loss,
                     val_acc,
-                    current_lr,
                 )
 
             if val_acc > best_val:
                 best_val = val_acc
                 epochs_no_improve = 0
+                best_test = test(model, data)  # evaluate only at best validation checkpoint
                 best_checkpoint = save_checkpoint(
                     sol_dir=sol_dir,
                     layer_str=_format_layers(prop_layer_sizes),
@@ -207,7 +207,7 @@ def run_solution(
                 break
 
         logging.info(
-            "Solution: %s | Channel Capacity: %.4f | best_val=%.4f | best_test=%.4f",
+            "Solution: %s | Channel Capacity: %.4f | best_val=%.4f | test@best_val=%.4f",
             prop_layer_sizes,
             channel_capacity,
             best_val,
@@ -229,7 +229,8 @@ def run_solution(
         else:
             raise RuntimeError(f"No checkpoints saved for solution {channel_str}.")
 
-    return best_test, best_checkpoint
+    return best_val, best_test, best_checkpoint
+
 
 def main() -> None:
     args = parse_args()
@@ -240,13 +241,16 @@ def main() -> None:
     if args.dataset in {'Cora','CiteSeer','PubMed'}:
         dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
     elif args.dataset in {'AmazonPhoto','AmazonComputers'}:
-        dataset = Amazon(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+        amazon_name = 'Photo' if args.dataset == 'AmazonPhoto' else 'Computers'
+        dataset = Amazon(str(args.data_root), name=amazon_name, transform=T.AddSelfLoops())
     elif args.dataset in {'Chameleon','Squirrel'}:
-        dataset = WikipediaNetwork(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+        wiki_name = args.dataset.lower()
+        dataset = WikipediaNetwork(str(args.data_root), name=wiki_name, transform=T.AddSelfLoops())
     else:
         dataset = PygNodePropPredDataset(name=args.dataset, transform=T.AddSelfLoops())
 
-    results: List[float] = []
+    val_results: List[float] = []
+    test_results: List[float] = []
     checkpoint_paths: List[Path] = []
     data = dataset[0]
     num_nodes = data.x.size(0)
@@ -258,9 +262,14 @@ def main() -> None:
     sigma_s = float(PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance())
     sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
     try:
-        solutions = ChanCapConEst(data, args.eta, sigma_s).optimize_weights(H, verbose=True)
-    except RuntimeError as exc:
-        logging.error("Channel capacity optimisation failed: %s", exc)
+        optimiser = ChanCapConEst(H=H, sigma_s=sigma_s, eta=args.eta)
+        solutions = optimiser.optimize_weights()
+    except Exception as exc:
+        logging.error("Capacity estimator failed: %s", exc, exc_info=True)
+        return
+
+    if not solutions:
+        logging.error("No solutions produced by capacity estimator.")
         return
 
     if len(solutions) != 3:
@@ -294,37 +303,38 @@ def main() -> None:
     else:
         split_idx = dataset.get_idx_split()
         train_idx, valid_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
+
         data.train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
         data.val_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
         data.test_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
         data.train_mask[train_idx] = True
         data.val_mask[valid_idx] = True
         data.test_mask[test_idx] = True
-        
+
     data = data.to(args.device)
     for layers, dropout, channel_capacity in zip(rounded_layers, dropout_schedules, channel_caps):
-        test_acc, checkpoint = run_solution(data, dataset, layers, dropout, channel_capacity, args)
-        results.append(test_acc)
+        best_val, test_at_best_val, checkpoint = run_solution(data, dataset, layers, dropout, channel_capacity, args)
+        val_results.append(best_val)
+        test_results.append(test_at_best_val)
         checkpoint_paths.append(checkpoint)
 
-    if not results:
+    if not val_results:
         logging.error("No feasible solutions were trained.")
         return
 
-    opt_result_index = max(range(len(results)), key=results.__getitem__)
+    opt_result_index = max(range(len(val_results)), key=val_results.__getitem__)
     best_layers = rounded_layers[opt_result_index]
     best_dropouts = dropout_schedules[opt_result_index]
-    best_capacity = channel_caps[opt_result_index]
-    best_performance = results[opt_result_index]
+    best_performance = test_results[opt_result_index]
     best_checkpoint = checkpoint_paths[opt_result_index]
 
-    print(
-        "Optimal hidden dimensions:{}, Dropout probabilities:{}, Network Channel Capacity:{:.4f}, Performance:{:.4f}".format(
-            best_layers,
-            best_dropouts,
-            best_capacity,
-            best_performance,
-        )
+    logging.info(
+        "Best solution index=%d | layers=%s | dropouts=%s | test@best_val=%.4f | checkpoint=%s",
+        opt_result_index,
+        best_layers,
+        best_dropouts,
+        best_performance,
+        best_checkpoint,
     )
 
     use_activations = [True] * len(best_layers)
@@ -355,6 +365,7 @@ def main() -> None:
 
     logging.info("Representation entropy: %.6f", rep_entropy)
     logging.info("Dirichlet energy: %.6f", rep_energy)
-    
+
+
 if __name__ == '__main__':
     main()
