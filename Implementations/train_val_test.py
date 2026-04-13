@@ -262,8 +262,8 @@ def main() -> None:
     sigma_s = float(PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance())
     sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
     try:
-        optimiser = ChanCapConEst(H=H, sigma_s=sigma_s, eta=args.eta)
-        solutions = optimiser.optimize_weights()
+        optimiser = ChanCapConEst(data=data, sigma_s=sigma_s, eta=args.eta)
+        solutions = optimiser.optimize_weights(H=H)
     except Exception as exc:
         logging.error("Capacity estimator failed: %s", exc, exc_info=True)
         return
