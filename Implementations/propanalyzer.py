@@ -190,6 +190,15 @@ class PropagationVarianceAnalyzer:
         # Cache for propagation matrices
         self._cache: Dict[str, csr_matrix] = {}
 
+    def _clear_method_cache(self, method: str) -> None:
+        """Invalidate cached propagation matrix for ``method``."""
+        self._cache.pop(method, None)
+
+    @staticmethod
+    def _uniform_theta(order: int) -> np.ndarray:
+        """Return a uniform coefficient vector of length ``order + 1``."""
+        return np.ones(order + 1, dtype=float) / float(order + 1)
+
     def _prop_gcn(self) -> csr_matrix:
         """Symmetric normalization propagation with self-loops (GCN)."""
         edge_index, edge_weight = gcn_norm(
@@ -344,3 +353,97 @@ class PropagationVarianceAnalyzer:
     def compute_all(self) -> Dict[str, float]:
         """Compute variances for all supported propagation methods."""
         return {m: self.compute_variance(m) for m in self.SUPPORTED if m != 'all'}
+
+    def compute_layerwise_variances(self, depth: int, method: Optional[str] = None) -> np.ndarray:
+        """
+        Compute per-layer propagation variances up to ``depth``.
+
+        For depth-conditioned propagation families (e.g. APPNP/SGC/GPR),
+        layer ``ℓ`` uses the method configured with ``k=ℓ`` (or iterations ``ℓ``).
+        For stationary operators (e.g. GCN/GDC), the same variance is repeated.
+        """
+        if depth <= 0:
+            raise ValueError("depth must be a positive integer")
+
+        m = (method or self.method).lower()
+        if m == 'all':
+            raise ValueError("Use a concrete propagation method, not 'all'.")
+        if m not in self.SUPPORTED:
+            raise ValueError(f"Unknown method '{m}'")
+
+        if m in {'gcn', 'gdc'}:
+            return np.full(depth, self.compute_variance(m), dtype=float)
+
+        if m == 'sgc':
+            original_k = self.sgc_k
+            values = []
+            for k in range(1, depth + 1):
+                self.sgc_k = k
+                self._clear_method_cache(m)
+                values.append(self.compute_variance(m))
+            self.sgc_k = original_k
+            self._clear_method_cache(m)
+            return np.asarray(values, dtype=float)
+
+        if m == 'appnp':
+            original_k = self.appnp_k
+            values = []
+            for k in range(1, depth + 1):
+                self.appnp_k = k
+                self._clear_method_cache(m)
+                values.append(self.compute_variance(m))
+            self.appnp_k = original_k
+            self._clear_method_cache(m)
+            return np.asarray(values, dtype=float)
+
+        if m == 'jacobiconv':
+            original_iters = self.jacobi_iters
+            values = []
+            for iters in range(1, depth + 1):
+                self.jacobi_iters = iters
+                self._clear_method_cache(m)
+                values.append(self.compute_variance(m))
+            self.jacobi_iters = original_iters
+            self._clear_method_cache(m)
+            return np.asarray(values, dtype=float)
+
+        if m == 's2gc':
+            original_k = self.s2gc_k
+            values = []
+            for k in range(1, depth + 1):
+                self.s2gc_k = k
+                self._clear_method_cache(m)
+                values.append(self.compute_variance(m))
+            self.s2gc_k = original_k
+            self._clear_method_cache(m)
+            return np.asarray(values, dtype=float)
+
+        if m == 'chebnetii':
+            original_k = self.cheb_k
+            original_theta = self.cheb_theta.copy()
+            values = []
+            for k in range(1, depth + 1):
+                self.cheb_k = k
+                self.cheb_theta = self._uniform_theta(k)
+                self._clear_method_cache(m)
+                values.append(self.compute_variance(m))
+            self.cheb_k = original_k
+            self.cheb_theta = original_theta
+            self._clear_method_cache(m)
+            return np.asarray(values, dtype=float)
+
+        if m == 'gprgnn':
+            original_k = self.gpr_k
+            original_theta = self.gpr_theta.copy()
+            values = []
+            for k in range(1, depth + 1):
+                self.gpr_k = k
+                self.gpr_theta = self._uniform_theta(k)
+                self._clear_method_cache(m)
+                values.append(self.compute_variance(m))
+            self.gpr_k = original_k
+            self.gpr_theta = original_theta
+            self._clear_method_cache(m)
+            return np.asarray(values, dtype=float)
+
+        raise ValueError(f"Layerwise variance is not implemented for method '{m}'")
