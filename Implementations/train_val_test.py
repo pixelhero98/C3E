@@ -99,6 +99,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--train_per_class', type=int, default=20, help='Number of node per class')
     parser.add_argument('--num_val', type=int, default=500, help='Number of node for validation')
     parser.add_argument('--num_test', type=int, default=1000, help='Number of node for test')
+    parser.add_argument('--max_layers', type=int, default=100,
+                        help='Maximum propagation depth explored by C3E.')
+    parser.add_argument('--sigma_profile', type=str, default='layerwise',
+                        choices=['global', 'layerwise'],
+                        help='Use one global propagation variance or layer-wise variances.')
     parser.add_argument('--device', choices=['cpu','cuda'], default='cuda' if torch.cuda.is_available() else 'cpu')
 
     return parser.parse_args()
@@ -259,11 +264,22 @@ def main() -> None:
         return
 
     H = float(np.log(num_nodes))
-    sigma_s = float(PropagationVarianceAnalyzer(data, method=args.prop_method).compute_variance())
-    sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
+    analyzer = PropagationVarianceAnalyzer(data, method=args.prop_method)
+    if args.sigma_profile == 'global':
+        sigma_s = float(analyzer.compute_variance())
+        sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
+        logging.info("Using global propagation variance sigma_s=%.6e", sigma_s)
+    else:
+        sigma_s = analyzer.compute_layerwise_variances(depth=args.max_layers)
+        sigma_s = np.maximum(sigma_s, float(np.finfo(np.float64).eps))
+        logging.info(
+            "Using layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
+            np.array2string(sigma_s[:5], precision=3, separator=', '),
+            len(sigma_s),
+        )
     try:
         optimiser = ChanCapConEst(data=data, sigma_s=sigma_s, eta=args.eta)
-        solutions = optimiser.optimize_weights(H=H)
+        solutions = optimiser.optimize_weights(H=H, max_layers=args.max_layers)
     except Exception as exc:
         logging.error("Capacity estimator failed: %s", exc, exc_info=True)
         return
