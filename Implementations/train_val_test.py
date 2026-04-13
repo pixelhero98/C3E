@@ -35,8 +35,12 @@ from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
 from torch_geometric.data import Data
 from tqdm import tqdm
 
-# Adjust sys.path if needed to import from your project
-sys.path.append(str(Path(__file__).resolve().parent))
+# Ensure repository-local imports work regardless of invocation directory.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.append(str(Path(__file__).resolve().parent))
 
 from Model_factory.model import Model
 from c3e import ChanCapConEst
