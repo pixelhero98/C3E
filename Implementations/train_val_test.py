@@ -23,30 +23,34 @@ import argparse
 import logging
 import random
 import sys
+from importlib import import_module
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
-from ogb.nodeproppred import PygNodePropPredDataset
-from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
 from torch_geometric.data import Data
+from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
 from tqdm import tqdm
 
 # Ensure repository-local imports work regardless of invocation directory.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
-    sys.path.append(str(REPO_ROOT))
-if str(Path(__file__).resolve().parent) not in sys.path:
-    sys.path.append(str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(REPO_ROOT))
 
-from Model_factory.model import Model
-from c3e import ChanCapConEst
-from propanalyzer import PropagationVarianceAnalyzer
-from utility import create_masks, load_checkpoint, save_checkpoint, test, train, val
-from Visualizations.entropy_energy import dirichlet_energy, representation_entropy
+from Model_factory.model import Model  # noqa: E402
+from Visualizations.entropy_energy import dirichlet_energy, representation_entropy  # noqa: E402
+
+if __package__:
+    from .c3e import ChanCapConEst
+    from .propanalyzer import PropagationVarianceAnalyzer
+    from .utility import create_masks, save_checkpoint, test, train, val
+else:
+    from c3e import ChanCapConEst
+    from propanalyzer import PropagationVarianceAnalyzer
+    from utility import create_masks, save_checkpoint, test, train, val
 
 
 CONV_METHOD_ALIASES = {
@@ -59,6 +63,17 @@ CONV_METHOD_ALIASES = {
     "jacobiconv": "jacobiconv",
     "s2gc": "s2gc",
 }
+
+
+def _load_ogb_dataset_class():
+    """Load the OGB dataset class only when an OGB dataset is requested."""
+    try:
+        module = import_module("ogb.nodeproppred")
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "ogb is required for ogbn-* datasets. Install ogb or choose a non-OGB dataset."
+        ) from exc
+    return module.PygNodePropPredDataset
 
 
 def set_seed(seed: int) -> None:
@@ -78,37 +93,67 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train GCN on Planetoid dataset with capacity estimation."
     )
-    parser.add_argument('--data_root', type=Path, default=Path.home() / 'data',
-                        help='Root directory for datasets')
-    parser.add_argument('--save_dir', type=Path, default=Path.home() / 'saved',
-                        help='Directory to save models and logs')
-    parser.add_argument('--dataset', type=str, default='Cora',
-                        choices=['Cora','CiteSeer','PubMed','Chameleon','Squirrel','AmazonPhoto','AmazonComputers','ogbn-arxiv','ogbn-papers100M'],
-                        help='Planetoid dataset name')
-    parser.add_argument('--epochs', type=int, default=500,
-                        help='Maximum number of training epochs')
-    parser.add_argument('--lr', type=float, default=1e-4,
-                        help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=5e-4,
-                        help='Weight decay (L2 regularization)')
-    parser.add_argument('--eta', type=float, default=0.5,
-                        help='Eta parameter for capacity estimator')
-    parser.add_argument('--patience', type=int, default=20,
-                        help='Early stopping patience (in epochs)')
-    parser.add_argument('--prop_method', type=str, default='gcn',
-                        choices=['gcn', 'appnp', 'gdc', 'sgc',
-                                 'chebnetii', 'gprgnn', 'jacobiconv', 's2gc'],
-                        help='Propagation method')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--train_per_class', type=int, default=20, help='Number of node per class')
-    parser.add_argument('--num_val', type=int, default=500, help='Number of node for validation')
-    parser.add_argument('--num_test', type=int, default=1000, help='Number of node for test')
-    parser.add_argument('--max_layers', type=int, default=100,
-                        help='Maximum propagation depth explored by C3E.')
-    parser.add_argument('--sigma_profile', type=str, default='layerwise',
-                        choices=['global', 'layerwise'],
-                        help='Use one global propagation variance or layer-wise variances.')
-    parser.add_argument('--device', choices=['cpu','cuda'], default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument(
+        "--data_root", type=Path, default=Path.home() / "data", help="Root directory for datasets"
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=Path,
+        default=Path.home() / "saved",
+        help="Directory to save models and logs",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="Cora",
+        choices=[
+            "Cora",
+            "CiteSeer",
+            "PubMed",
+            "Chameleon",
+            "Squirrel",
+            "AmazonPhoto",
+            "AmazonComputers",
+            "ogbn-arxiv",
+            "ogbn-papers100M",
+        ],
+        help="Planetoid dataset name",
+    )
+    parser.add_argument("--epochs", type=int, default=500, help="Maximum number of training epochs")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument(
+        "--weight_decay", type=float, default=5e-4, help="Weight decay (L2 regularization)"
+    )
+    parser.add_argument(
+        "--eta", type=float, default=0.5, help="Eta parameter for capacity estimator"
+    )
+    parser.add_argument(
+        "--patience", type=int, default=20, help="Early stopping patience (in epochs)"
+    )
+    parser.add_argument(
+        "--prop_method",
+        type=str,
+        default="gcn",
+        choices=["gcn", "appnp", "gdc", "sgc", "chebnetii", "gprgnn", "jacobiconv", "s2gc"],
+        help="Propagation method",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--train_per_class", type=int, default=20, help="Number of node per class")
+    parser.add_argument("--num_val", type=int, default=500, help="Number of node for validation")
+    parser.add_argument("--num_test", type=int, default=1000, help="Number of node for test")
+    parser.add_argument(
+        "--max_layers", type=int, default=100, help="Maximum propagation depth explored by C3E."
+    )
+    parser.add_argument(
+        "--sigma_profile",
+        type=str,
+        default="layerwise",
+        choices=["global", "layerwise"],
+        help="Use one global propagation variance or layer-wise variances.",
+    )
+    parser.add_argument(
+        "--device", choices=["cpu", "cuda"], default="cuda" if torch.cuda.is_available() else "cpu"
+    )
 
     return parser.parse_args()
 
@@ -118,20 +163,35 @@ def setup_logging(save_dir: Path) -> None:
 
     save_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
-        filename=save_dir / 'training.log',
+        filename=save_dir / "training.log",
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(levelname)s - %(message)s",
     )
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S')
+    formatter = logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S")
     console.setFormatter(formatter)
     logging.getLogger().addHandler(console)
 
 
 def _format_layers(layers: Sequence[int]) -> str:
     """Format layer sizes for checkpoint filenames."""
-    return "-".join(str(int(l)) for l in layers)
+    return "-".join(str(int(layer_width)) for layer_width in layers)
+
+
+def load_dataset(args: argparse.Namespace):
+    """Construct the dataset requested by the CLI arguments."""
+    if args.dataset in {"Cora", "CiteSeer", "PubMed"}:
+        return Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
+    if args.dataset in {"AmazonPhoto", "AmazonComputers"}:
+        amazon_name = "Photo" if args.dataset == "AmazonPhoto" else "Computers"
+        return Amazon(str(args.data_root), name=amazon_name, transform=T.AddSelfLoops())
+    if args.dataset in {"Chameleon", "Squirrel"}:
+        wiki_name = args.dataset.lower()
+        return WikipediaNetwork(str(args.data_root), name=wiki_name, transform=T.AddSelfLoops())
+
+    dataset_class = _load_ogb_dataset_class()
+    return dataset_class(name=args.dataset, transform=T.AddSelfLoops())
 
 
 def run_solution(
@@ -140,13 +200,13 @@ def run_solution(
     layers: Sequence[int],
     dropout: Sequence[float],
     channel_capacity: float,
-    args: argparse.Namespace
+    args: argparse.Namespace,
 ) -> Tuple[float, float, Path]:
     """Train a candidate architecture and return (best_val_acc, test_acc_at_best_val, checkpoint_path)."""
 
     prop_layer_sizes = list(layers)
     drop_probs = list(dropout)
-    channel_str = f"{channel_capacity:.6g}".replace('.', 'p')
+    channel_str = f"{channel_capacity:.6g}".replace(".", "p")
     sol_dir = args.save_dir / f"sol_{channel_str}"
     sol_dir.mkdir(parents=True, exist_ok=True)
 
@@ -157,7 +217,7 @@ def run_solution(
         num_class=dataset.num_classes,
         drop_probs=drop_probs,
         use_activations=[True] * len(prop_layer_sizes),
-        conv_methods=conv_method
+        conv_methods=conv_method,
     ).to(args.device)
 
     optimizer = torch.optim.Adam(
@@ -167,7 +227,7 @@ def run_solution(
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        mode='max',
+        mode="max",
         factor=0.5,
         patience=10,
         verbose=False,
@@ -176,7 +236,9 @@ def run_solution(
     best_val, best_test = float("-inf"), 0.0
     best_checkpoint: Optional[Path] = None
     epochs_no_improve = 0
-    logging.info("Starting training for solution: layers=%s, dropout=%s", prop_layer_sizes, drop_probs)
+    logging.info(
+        "Starting training for solution: layers=%s, dropout=%s", prop_layer_sizes, drop_probs
+    )
 
     try:
         for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {channel_str}", file=sys.stdout):
@@ -225,6 +287,7 @@ def run_solution(
 
     except Exception as exc:  # pragma: no cover - defensive logging
         logging.error("Error in solution %s: %s", channel_str, exc, exc_info=True)
+        raise RuntimeError(f"Training failed for solution {channel_str}.") from exc
 
     finally:
         del model, optimizer, scheduler
@@ -232,7 +295,7 @@ def run_solution(
             torch.cuda.empty_cache()
 
     if best_checkpoint is None:
-        checkpoints = sorted(sol_dir.glob('best_val_*.pt'))
+        checkpoints = sorted(sol_dir.glob("best_val_*.pt"))
         if checkpoints:
             best_checkpoint = checkpoints[-1]
         else:
@@ -244,19 +307,14 @@ def run_solution(
 def main() -> None:
     args = parse_args()
     setup_logging(args.save_dir)
-    logging.info(f"Arguments: {args}")
+    logging.info("Arguments: %s", args)
     set_seed(args.seed)
 
-    if args.dataset in {'Cora','CiteSeer','PubMed'}:
-        dataset = Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
-    elif args.dataset in {'AmazonPhoto','AmazonComputers'}:
-        amazon_name = 'Photo' if args.dataset == 'AmazonPhoto' else 'Computers'
-        dataset = Amazon(str(args.data_root), name=amazon_name, transform=T.AddSelfLoops())
-    elif args.dataset in {'Chameleon','Squirrel'}:
-        wiki_name = args.dataset.lower()
-        dataset = WikipediaNetwork(str(args.data_root), name=wiki_name, transform=T.AddSelfLoops())
-    else:
-        dataset = PygNodePropPredDataset(name=args.dataset, transform=T.AddSelfLoops())
+    try:
+        dataset = load_dataset(args)
+    except ModuleNotFoundError:
+        logging.exception("Dataset initialisation failed.")
+        raise
 
     val_results: List[float] = []
     test_results: List[float] = []
@@ -264,12 +322,13 @@ def main() -> None:
     data = dataset[0]
     num_nodes = data.x.size(0)
     if num_nodes <= 0:
-        logging.error("Dataset contains no nodes; cannot proceed with training.")
-        return
+        message = "Dataset contains no nodes; cannot proceed with training."
+        logging.error(message)
+        raise ValueError(message)
 
     H = float(np.log(num_nodes))
     analyzer = PropagationVarianceAnalyzer(data, method=args.prop_method)
-    if args.sigma_profile == 'global':
+    if args.sigma_profile == "global":
         sigma_s = float(analyzer.compute_variance())
         sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
         logging.info("Using global propagation variance sigma_s=%.6e", sigma_s)
@@ -278,7 +337,7 @@ def main() -> None:
         sigma_s = np.maximum(sigma_s, float(np.finfo(np.float64).eps))
         logging.info(
             "Using layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
-            np.array2string(sigma_s[:5], precision=3, separator=', '),
+            np.array2string(sigma_s[:5], precision=3, separator=", "),
             len(sigma_s),
         )
     try:
@@ -286,33 +345,35 @@ def main() -> None:
         solutions = optimiser.optimize_weights(H=H, max_layers=args.max_layers)
     except Exception as exc:
         logging.error("Capacity estimator failed: %s", exc, exc_info=True)
-        return
+        raise RuntimeError("Capacity estimator failed.") from exc
 
     if not solutions:
-        logging.error("No solutions produced by capacity estimator.")
-        return
+        message = "No solutions produced by capacity estimator."
+        logging.error(message)
+        raise RuntimeError(message)
 
     if len(solutions) != 3:
         logging.error("Unexpected solution structure returned by optimiser: %s", solutions)
-        return
+        raise RuntimeError("Unexpected solution structure returned by optimiser.")
 
     rounded_layers, dropout_schedules, channel_caps = solutions
 
     if not (rounded_layers and dropout_schedules and channel_caps):
         logging.error("Optimiser returned empty solution components: %s", solutions)
-        return
+        raise RuntimeError("Optimiser returned empty solution components.")
 
     if not (len(rounded_layers) == len(dropout_schedules) == len(channel_caps)):
         logging.error(
-            "Optimiser produced mismatched component lengths: %s", {
-                'layers': len(rounded_layers),
-                'dropout': len(dropout_schedules),
-                'capacity': len(channel_caps),
-            }
+            "Optimiser produced mismatched component lengths: %s",
+            {
+                "layers": len(rounded_layers),
+                "dropout": len(dropout_schedules),
+                "capacity": len(channel_caps),
+            },
         )
-        return
+        raise RuntimeError("Optimiser produced mismatched component lengths.")
 
-    if args.dataset not in {'ogbn-arxiv','ogbn-papers100M'}:
+    if args.dataset not in {"ogbn-arxiv", "ogbn-papers100M"}:
         data.train_mask, data.val_mask, data.test_mask = create_masks(
             data,
             args.train_per_class,
@@ -333,14 +394,17 @@ def main() -> None:
 
     data = data.to(args.device)
     for layers, dropout, channel_capacity in zip(rounded_layers, dropout_schedules, channel_caps):
-        best_val, test_at_best_val, checkpoint = run_solution(data, dataset, layers, dropout, channel_capacity, args)
+        best_val, test_at_best_val, checkpoint = run_solution(
+            data, dataset, layers, dropout, channel_capacity, args
+        )
         val_results.append(best_val)
         test_results.append(test_at_best_val)
         checkpoint_paths.append(checkpoint)
 
     if not val_results:
-        logging.error("No feasible solutions were trained.")
-        return
+        message = "No feasible solutions were trained."
+        logging.error(message)
+        raise RuntimeError(message)
 
     opt_result_index = max(range(len(val_results)), key=val_results.__getitem__)
     best_layers = rounded_layers[opt_result_index]
@@ -387,5 +451,5 @@ def main() -> None:
     logging.info("Dirichlet energy: %s", rep_energy)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

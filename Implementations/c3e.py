@@ -82,7 +82,7 @@ class ChanCapConEst:
         """
         if self.M <= 0:
             raise ValueError("The number of features (M) must be > 0.")
-    
+
         if self.sigma_s is not None:
             sig = np.asarray(self.sigma_s, dtype=float).ravel()
             if not np.all(np.isfinite(sig)) or np.any(sig <= 0):
@@ -97,27 +97,25 @@ class ChanCapConEst:
 
         return float(self.M * (self.d ** (1.0 / self.d)))
 
-
     def _layer_variances(self, length: int) -> np.ndarray:
         """Return per-layer variance values for the given network depth."""
         if self.sigma_s is None:
             d_safe = max(self.d, TINY)
             return np.full(length, 1.0 / d_safe, dtype=float)
-    
+
         sigma = np.asarray(self.sigma_s, dtype=float).ravel()
         if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0):
             raise ValueError("All sigma_s values must be positive and finite.")
-    
+
         if sigma.size == 1:
             return np.full(length, float(sigma[0]), dtype=float)
-    
+
         if sigma.size < length:
             # pad with the last provided value
             pad = np.full(length - sigma.size, float(sigma[-1]), dtype=float)
             return np.concatenate([sigma, pad])
-    
-        return sigma[:length]
 
+        return sigma[:length]
 
     def _violates_strict_guards(self, w: np.ndarray) -> bool:
         """
@@ -134,11 +132,11 @@ class ChanCapConEst:
             return True
         L = len(w)
         reg_m = self.regularized_feature_dim()
-    
+
         # (i) strict per-layer cap
         if np.any(w > (reg_m + 1)):
             return True
-    
+
         # K and w̄
         # per-layer variances σ^2
         sigma2 = self._layer_variances(L)
@@ -154,7 +152,6 @@ class ChanCapConEst:
             return True
 
         return False
-
 
     def objective(self, w: np.ndarray) -> float:
         # strict guards (OR of all three): if any trip, penalize
@@ -173,14 +170,9 @@ class ChanCapConEst:
         L = len(w)
 
         sigma2 = self._layer_variances(L)
-        per_layer = (
-            np.log(self.N + TINY)
-            + np.log(w_ext[:-1] + TINY)
-            + np.log(sigma2 + TINY)
-        )
+        per_layer = np.log(self.N + TINY) + np.log(w_ext[:-1] + TINY) + np.log(sigma2 + TINY)
         phi = 0.5 * (np.log(2.0 * np.pi * np.e) + per_layer.sum())
         return -phi
-
 
     def constraint(self, w: np.ndarray, H: float = 0.0) -> float:
         """
@@ -202,10 +194,7 @@ class ChanCapConEst:
         L = len(w)
 
         # log HM terms h_ℓ
-        h = np.log(
-            (w_ext[:-1] * w_ext[1:] + TINY)
-            / (w_ext[:-1] + w_ext[1:] + TINY)
-        )
+        h = np.log((w_ext[:-1] * w_ext[1:] + TINY) / (w_ext[:-1] + w_ext[1:] + TINY))
 
         # resolve σ^2 per layer
         if self.sigma_s is None:
@@ -221,11 +210,7 @@ class ChanCapConEst:
                 phi0 = (h / idx).sum()
             else:
                 # varying-σ case: exact DEN/NUM weights
-                den = (
-                    np.log(self.N + TINY)
-                    + np.log(w_ext[:-1] + TINY)
-                    + np.log(sigma2 + TINY)
-                )
+                den = np.log(self.N + TINY) + np.log(w_ext[:-1] + TINY) + np.log(sigma2 + TINY)
                 num_prefix = np.cumsum(den) + np.log(2.0 * np.pi * np.e)
                 weights = den / (num_prefix + TINY)
                 phi0 = np.sum(h * weights)
@@ -233,10 +218,7 @@ class ChanCapConEst:
         return float(phi0 - H)
 
     def optimize_weights(
-        self,
-        H: float,
-        verbose: bool = False,
-        max_layers: int = 100
+        self, H: float, verbose: bool = False, max_layers: int = 100
     ) -> Tuple[List[List[int]], List[List[float]], List[float]]:
         """
         Estimate layer widths under lower bound constraint H, up to max_layers.
@@ -246,22 +228,22 @@ class ChanCapConEst:
         all_rounded: List[List[int]] = []
         all_dropouts: List[List[float]] = []
         all_channel_capacity: List[float] = []
-        
+
         for L in range(2, max_layers + 1):
             w0 = np.full(L, 2.0)
             upper = max(float(self.M + 1.0), float((self.N - 1) * self.M))
             if upper <= 2.0:
                 upper = 2.0 + 1.0
             bounds = [(2.0, upper)] * L
-            cons = {'type': 'ineq', 'fun': lambda w, H=H: self.constraint(w, H)}
+            cons = {"type": "ineq", "fun": lambda w, H=H: self.constraint(w, H)}
 
             result = minimize(
                 fun=self.objective,
                 x0=w0,
-                method='SLSQP',
+                method="SLSQP",
                 bounds=bounds,
                 constraints=[cons],
-                options={'ftol': 1e-6, 'maxiter': 100},
+                options={"ftol": 1e-6, "maxiter": 100},
             )
 
             if not result.success:
@@ -287,12 +269,18 @@ class ChanCapConEst:
                 print(f"Hidden dimensions    : {weights.tolist()}")
                 print(f"Rounded hidden dims  : {rounded_weights}")
                 print(f"Network channel capacity: {entropy:.4f}")
-                print(f"Lower bound          : {constraint_val + H:.4f} in [{H:.4f}, {(H / self.eta):.4f}]")
+                print(
+                    f"Lower bound          : {constraint_val + H:.4f} in [{H:.4f}, {(H / self.eta):.4f}]"
+                )
                 print(f"Dropout probabilities: {dropout_probs}")
-                print(f"Rep. compression     : {self.rep_compression_ratio(weights.tolist(), entropy):.4f}")
+                print(
+                    f"Rep. compression     : {self.rep_compression_ratio(weights.tolist(), entropy):.4f}"
+                )
 
             # return all results up to the first L that meets the constraint
             if constraint_val + H > H / self.eta:
                 return (all_rounded, all_dropouts, all_channel_capacity)
 
-        raise RuntimeError(f"Failed to meet lower bound constraint H={H} within {max_layers} layers.")
+        raise RuntimeError(
+            f"Failed to meet lower bound constraint H={H} within {max_layers} layers."
+        )

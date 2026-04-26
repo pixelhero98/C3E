@@ -1,5 +1,38 @@
 # Channel Capacity Constrained Estimation (arxiv version: https://arxiv.org/abs/2511.06443)
 
+## Setup
+
+Use Python 3.8 or newer. The training code depends on PyTorch, PyTorch Geometric,
+`torch-sparse`, SciPy, NumPy, OGB, and tqdm.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+On GPU clusters, install the PyTorch and PyTorch Geometric wheels that match the
+site CUDA/PyTorch module before installing the remaining requirements.
+
+## Usage
+
+Run from the repository root:
+
+```bash
+python -m Implementations.train_val_test --dataset Cora --prop_method gcn
+```
+
+The script stores datasets under `~/data` and checkpoints/logs under `~/saved`
+by default. Override those paths on shared systems:
+
+```bash
+python -m Implementations.train_val_test \
+  --dataset CiteSeer \
+  --data_root /path/to/data \
+  --save_dir /path/to/checkpoints
+```
+
 ## Example results (**no graph rewiring, round to the continuous values to the nearest for implementation**)
 
 **Cora**,
