@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from torch_geometric.nn import GCNConv, SGConv, SSGConv
 
@@ -26,9 +25,7 @@ class Model(nn.Module):
 
         # Validate dropout schedule length early (prevents forward-time IndexError).
         if len(drop_probs) != self.num_layers:
-            raise ValueError(
-                f"drop_probs length must be {self.num_layers}, got {len(drop_probs)}"
-            )
+            raise ValueError(f"drop_probs length must be {self.num_layers}, got {len(drop_probs)}")
 
         # Determine convolution method(s)
         default = "gcn"
@@ -46,7 +43,7 @@ class Model(nn.Module):
         conv_map = {
             "gcn": GCNConv,
             "appnp": APPNPConv,
-            "gdc": GCNConv,      # if you later apply GDC diffusion, pass weights via data.edge_attr/edge_weight
+            "gdc": GCNConv,  # if you later apply GDC diffusion, pass weights via data.edge_attr/edge_weight
             "sgc": SGConv,
             "s2gc": SSGConv,
             "jacobi": JACOBIConv,
@@ -87,16 +84,22 @@ class Model(nn.Module):
                 )
             elif key == "sgc":
                 self.propagation.append(
-                    _try_construct(Conv, prop_layer[i], prop_layer[i + 1], K=1, add_self_loops=False)
+                    _try_construct(
+                        Conv, prop_layer[i], prop_layer[i + 1], K=1, add_self_loops=False
+                    )
                 )
             elif key == "s2gc":
                 self.propagation.append(
-                    _try_construct(Conv, prop_layer[i], prop_layer[i + 1], alpha=0.1, K=1, add_self_loops=False)
+                    _try_construct(
+                        Conv, prop_layer[i], prop_layer[i + 1], alpha=0.1, K=1, add_self_loops=False
+                    )
                 )
             else:
                 # GCNConv: avoid double self-looping when the dataset transform already adds self-loops.
                 if key in {"gcn", "gdc"}:
-                    self.propagation.append(_try_construct(Conv, prop_layer[i], prop_layer[i + 1], add_self_loops=False))
+                    self.propagation.append(
+                        _try_construct(Conv, prop_layer[i], prop_layer[i + 1], add_self_loops=False)
+                    )
                 else:
                     self.propagation.append(Conv(prop_layer[i], prop_layer[i + 1]))
 
@@ -134,7 +137,11 @@ class Model(nn.Module):
         for i, conv in enumerate(self.propagation):
             # Prefer passing edge weights when present; fall back if a layer doesn't accept it.
             try:
-                h_new = conv(h, edge_index, edge_weight=edge_weight) if edge_weight is not None else conv(h, edge_index)
+                h_new = (
+                    conv(h, edge_index, edge_weight=edge_weight)
+                    if edge_weight is not None
+                    else conv(h, edge_index)
+                )
             except TypeError:
                 h_new = conv(h, edge_index)
 

@@ -47,7 +47,7 @@ def create_masks(
         num_classes = int(y.max().item()) + 1
 
     if seed is not None:
-        device = y.device if y.is_cuda else torch.device('cpu')
+        device = y.device if y.is_cuda else torch.device("cpu")
         generator = torch.Generator(device=device)
         generator.manual_seed(seed)
     else:
@@ -62,8 +62,7 @@ def create_masks(
         idx_c = (y == c).nonzero(as_tuple=False).view(-1)
         if idx_c.numel() < train_per_class:
             raise ValueError(
-                f"Class {c} has only {idx_c.numel()} samples, "
-                f"but you requested {train_per_class}"
+                f"Class {c} has only {idx_c.numel()} samples, but you requested {train_per_class}"
             )
         perm = idx_c[torch.randperm(idx_c.size(0), generator=generator, device=idx_c.device)]
         train_mask[perm[:train_per_class]] = True
@@ -73,8 +72,7 @@ def create_masks(
     rem = rem[torch.randperm(rem.size(0), generator=generator, device=rem.device)]
     if rem.numel() < (num_val + num_test):
         raise ValueError(
-            f"Not enough remaining samples ({rem.numel()}) for "
-            f"{num_val} val + {num_test} test"
+            f"Not enough remaining samples ({rem.numel()}) for {num_val} val + {num_test} test"
         )
     val_mask[rem[:num_val]] = True
     test_mask[rem[num_val : num_val + num_test]] = True
@@ -175,9 +173,13 @@ def get_model_rep(model: nn.Module, data: Data):
 
     # Register hooks
     if not hasattr(model, "propagation"):
-        raise AttributeError("Model does not define a 'propagation' attribute for convolution layers.")
+        raise AttributeError(
+            "Model does not define a 'propagation' attribute for convolution layers."
+        )
     if not hasattr(model, "activations"):
-        raise AttributeError("Model does not define an 'activations' attribute for activation layers.")
+        raise AttributeError(
+            "Model does not define an 'activations' attribute for activation layers."
+        )
 
     for conv in model.propagation:
         hooks.append(conv.register_forward_hook(hook_conv))
@@ -220,15 +222,15 @@ def show_layer_rep_entropy(conv_reps, act_reps, data, nbins: int = 100):
     """
     Print entropy for input features and each conv and activation layer separately.
     """
-    entropies = {'input': rep_entropy(data.x, nbins)}
+    entropies = {"input": rep_entropy(data.x, nbins)}
 
     for idx, rep in enumerate(conv_reps, start=1):
-        entropies[f'conv_{idx}'] = rep_entropy(rep, nbins)
+        entropies[f"conv_{idx}"] = rep_entropy(rep, nbins)
     for idx, rep in enumerate(act_reps, start=1):
-        entropies[f'act_{idx}'] = rep_entropy(rep, nbins)
+        entropies[f"act_{idx}"] = rep_entropy(rep, nbins)
 
     print(entropies)
-    print('===============================================================')
+    print("===============================================================")
 
     return entropies
 
@@ -266,7 +268,7 @@ def compute_normalized_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTe
     adjacency = SparseTensor(row=row, col=col, value=values, sparse_sizes=(num_nodes, num_nodes))
     deg = adjacency.sum(dim=1)
     deg_inv_sqrt = deg.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+    deg_inv_sqrt[deg_inv_sqrt == float("inf")] = 0
     deg_inv_sqrt_matrix = SparseTensor.diag(deg_inv_sqrt)
     identity = SparseTensor.eye(num_nodes, device=deg.device)
     normalized_adj = deg_inv_sqrt_matrix @ adjacency @ deg_inv_sqrt_matrix
@@ -309,17 +311,17 @@ def save_checkpoint(
     dropout: Sequence[float],
 ) -> Path:
     checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict(),
-        'best_val_acc': best_val,
-        'layer_sizes': layer_sizes,
-        'dropout': dropout,
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "best_val_acc": best_val,
+        "layer_sizes": layer_sizes,
+        "dropout": dropout,
     }
     ckpt_path = sol_dir / f"best_val_{layer_str}_ep{epoch}.pt"
     torch.save(checkpoint, ckpt_path)
-    logging.info(f"Saved checkpoint: {ckpt_path}")
+    logging.info("Saved checkpoint: %s", ckpt_path)
     return ckpt_path
 
 
@@ -328,19 +330,19 @@ def load_checkpoint(
     model: nn.Module,
     optimizer: Optional[optim.Optimizer] = None,
     scheduler: Optional[lr_scheduler._LRScheduler] = None,
-    device: Union[str, torch.device] = 'cpu',
+    device: Union[str, torch.device] = "cpu",
 ) -> dict:
     """
     Load checkpoint into model and optionally optimizer/scheduler.
     """
     checkpoint = torch.load(Path(path), map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model.load_state_dict(checkpoint["model_state_dict"])
 
-    if optimizer is not None and 'optimizer_state_dict' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if optimizer is not None and "optimizer_state_dict" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-    if scheduler is not None and 'scheduler_state_dict' in checkpoint:
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    if scheduler is not None and "scheduler_state_dict" in checkpoint:
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     return checkpoint
 
@@ -348,7 +350,7 @@ def load_checkpoint(
 def load_model(
     model_class,
     path: Union[str, Path],
-    device: Union[str, torch.device] = 'cpu',
+    device: Union[str, torch.device] = "cpu",
     *model_args,
     **model_kwargs,
 ) -> nn.Module:
@@ -366,7 +368,7 @@ def load_model(
     """
     model = model_class(*model_args, **model_kwargs)
     checkpoint = torch.load(Path(path), map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     model.eval()
     return model

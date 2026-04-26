@@ -1,0 +1,7 @@
+numpy
+scipy
+torch
+torch-geometric
+torch-sparse
+ogb
+tqdm

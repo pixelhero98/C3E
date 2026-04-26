@@ -33,7 +33,9 @@ class GPRConv(MessagePassing):
         # Feature projection
         self.lin = Linear(in_channels, out_channels, bias=bias)
 
-        assert Init in ["SGC", "PPR", "NPPR", "Random", "WS"], f"Unsupported Init mode '{Init}'"
+        valid_init_modes = {"SGC", "PPR", "NPPR", "Random", "WS"}
+        if Init not in valid_init_modes:
+            raise ValueError(f"Unsupported Init mode '{Init}'")
 
         # Initialize propagation coefficients
         if Init == "SGC":
@@ -48,7 +50,7 @@ class GPRConv(MessagePassing):
             TEMP[-1] = (1 - self.alpha) ** self.K
         elif Init == "NPPR":
             arange = torch.arange(self.K + 1, dtype=torch.float)
-            TEMP = self.alpha ** arange
+            TEMP = self.alpha**arange
             TEMP = TEMP / TEMP.abs().sum()
         elif Init == "Random":
             bound = (3.0 / (self.K + 1)) ** 0.5
@@ -75,12 +77,14 @@ class GPRConv(MessagePassing):
                 self.temp.copy_(temp)
             elif self.Init == "NPPR":
                 arange = torch.arange(self.K + 1, dtype=self.temp.dtype, device=self.temp.device)
-                temp = self.alpha ** arange
+                temp = self.alpha**arange
                 temp = temp / temp.abs().sum()
                 self.temp.copy_(temp)
             elif self.Init == "Random":
                 bound = (3.0 / (self.K + 1)) ** 0.5
-                temp = torch.empty(self.K + 1, dtype=self.temp.dtype, device=self.temp.device).uniform_(-bound, bound)
+                temp = torch.empty(
+                    self.K + 1, dtype=self.temp.dtype, device=self.temp.device
+                ).uniform_(-bound, bound)
                 temp = temp / temp.abs().sum()
                 self.temp.copy_(temp)
             else:  # "WS"

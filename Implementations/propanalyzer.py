@@ -1,15 +1,14 @@
-from __future__ import annotations
-
 from typing import Dict, Optional
 
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix, diags, identity
 from torch_geometric.data import Data
-from torch_geometric.transforms import GDC
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
+from torch_geometric.transforms import GDC
 from torch_geometric.utils import (
     from_scipy_sparse_matrix,
+    remove_self_loops,
     to_scipy_sparse_matrix,
 )
 
@@ -23,8 +22,8 @@ def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
     row_sums[row_sums == 0] = 1
     inv_sqrt = 1.0 / np.sqrt(row_sums)
     D_inv_sqrt = diags(inv_sqrt)
-    L = identity(A_csr.shape[0], format='csr') - D_inv_sqrt @ A_csr @ D_inv_sqrt
-    return 2 * L - identity(A_csr.shape[0], format='csr')
+    L = identity(A_csr.shape[0], format="csr") - D_inv_sqrt @ A_csr @ D_inv_sqrt
+    return 2 * L - identity(A_csr.shape[0], format="csr")
 
 
 class PropagationVarianceAnalyzer:
@@ -33,25 +32,22 @@ class PropagationVarianceAnalyzer:
     propagation schemes. Supported methods: 'gcn', 'appnp', 'gdc', 'sgc',
     'chebnetii', 'gprgnn', 'jacobiconv', 's2gc', or 'all'.
     """
-    SUPPORTED = {
-        'gcn', 'appnp', 'gdc', 'sgc',
-        'chebnetii', 'gprgnn', 'jacobiconv',
-        's2gc', 'all'
-    }
+
+    SUPPORTED = {"gcn", "appnp", "gdc", "sgc", "chebnetii", "gprgnn", "jacobiconv", "s2gc", "all"}
 
     def __init__(
         self,
         data,
-        method: str = 'all',
+        method: str = "all",
         # APPNP
         appnp_k: int = 10,
         appnp_alpha: float = 0.1,
         # GDC diffusion
-        gdc_method: str = 'ppr',
+        gdc_method: str = "ppr",
         alpha: float = 0.05,
         heat_t: float = 1.0,
         # GDC sparsification
-        gdc_spars_method: str = 'topk',
+        gdc_spars_method: str = "topk",
         gdc_avg_degree: int = 64,
         gdc_threshold_eps: float = 1e-4,
         gdc_exact: bool = False,
@@ -81,9 +77,9 @@ class PropagationVarianceAnalyzer:
                 edge_index = edge_index.cpu()
             # Prefer explicit edge weights if present; otherwise fall back to
             # 1-D edge attributes (common for weighted graphs).
-            edge_weight = getattr(data, 'edge_weight', None)
+            edge_weight = getattr(data, "edge_weight", None)
             if edge_weight is None:
-                edge_attr = getattr(data, 'edge_attr', None)
+                edge_attr = getattr(data, "edge_attr", None)
                 if isinstance(edge_attr, torch.Tensor):
                     if edge_attr.dim() == 1:
                         edge_weight = edge_attr
@@ -138,24 +134,24 @@ class PropagationVarianceAnalyzer:
         # Ensure cached Data lives on CPU to avoid unwanted host/device transfers
         self.data = self.data.clone()
         if hasattr(self.data, "to"):
-            self.data = self.data.to('cpu')
+            self.data = self.data.to("cpu")
 
         # Store parameters
-        self.appnp_k          = appnp_k
-        self.appnp_alpha      = appnp_alpha
-        self.alpha            = alpha
-        self.heat_t           = heat_t
+        self.appnp_k = appnp_k
+        self.appnp_alpha = appnp_alpha
+        self.alpha = alpha
+        self.heat_t = heat_t
         self.gdc_spars_method = gdc_spars_method.lower()
-        self.gdc_avg_degree   = gdc_avg_degree
-        self.gdc_threshold_eps= gdc_threshold_eps
-        self.gdc_exact        = gdc_exact
-        self.sgc_k            = sgc_k
-        self.cheb_k           = cheb_k
-        self.gpr_k            = gpr_k
-        self.jacobi_iters     = jacobi_iters
-        self.jacobi_alpha     = jacobi_alpha
-        self.s2gc_k           = s2gc_k
-        self.s2gc_alpha       = s2gc_alpha
+        self.gdc_avg_degree = gdc_avg_degree
+        self.gdc_threshold_eps = gdc_threshold_eps
+        self.gdc_exact = gdc_exact
+        self.sgc_k = sgc_k
+        self.cheb_k = cheb_k
+        self.gpr_k = gpr_k
+        self.jacobi_iters = jacobi_iters
+        self.jacobi_alpha = jacobi_alpha
+        self.s2gc_k = s2gc_k
+        self.s2gc_alpha = s2gc_alpha
 
         cheb_theta = (
             np.asarray(cheb_theta, dtype=float)
@@ -176,15 +172,14 @@ class PropagationVarianceAnalyzer:
         )
         if gpr_theta.shape[0] != self.gpr_k + 1:
             raise ValueError(
-                "gpr_theta must have length gpr_k + 1 "
-                f"({self.gpr_k + 1}), got {gpr_theta.shape[0]}"
+                f"gpr_theta must have length gpr_k + 1 ({self.gpr_k + 1}), got {gpr_theta.shape[0]}"
             )
         self.gpr_theta = gpr_theta
 
-        if self.gdc_spars_method not in {'topk', 'threshold'}:
+        if self.gdc_spars_method not in {"topk", "threshold"}:
             raise ValueError("gdc_spars_method must be 'topk' or 'threshold'")
         self.gdc_method = gdc_method.lower()
-        if self.gdc_method not in {'ppr', 'heat'}:
+        if self.gdc_method not in {"ppr", "heat"}:
             raise ValueError("gdc_method must be 'ppr' or 'heat'")
 
         # Cache for propagation matrices
@@ -203,14 +198,12 @@ class PropagationVarianceAnalyzer:
         """Symmetric normalization propagation with self-loops (GCN)."""
         edge_index, edge_weight = gcn_norm(
             self.data.edge_index,
-            getattr(self.data, 'edge_weight', None),
+            getattr(self.data, "edge_weight", None),
             num_nodes=self.A.shape[0],
             improved=False,
-            add_self_loops=True
+            add_self_loops=True,
         )
-        return to_scipy_sparse_matrix(
-            edge_index, edge_weight, num_nodes=self.A.shape[0]
-        ).tocsr()
+        return to_scipy_sparse_matrix(edge_index, edge_weight, num_nodes=self.A.shape[0]).tocsr()
 
     def _prop_appnp(self) -> csr_matrix:
         """Approximate personalized propagation of neural predictions (APPNP)."""
@@ -219,8 +212,8 @@ class PropagationVarianceAnalyzer:
         P = diags(1.0 / row_sums) @ self.A
         transition = (1.0 - self.appnp_alpha) * P
         N = self.A.shape[0]
-        S = self.appnp_alpha * identity(N, format='csr')
-        M_power = identity(N, format='csr')
+        S = self.appnp_alpha * identity(N, format="csr")
+        M_power = identity(N, format="csr")
         for _ in range(self.appnp_k):
             M_power = transition @ M_power
             S += self.appnp_alpha * M_power
@@ -231,35 +224,33 @@ class PropagationVarianceAnalyzer:
         N = self.A.shape[0]
         # diffusion kwargs
         diff_kwargs = (
-            {'method': 'heat', 't': self.heat_t}
-            if self.gdc_method == 'heat'
-            else {'method': 'ppr', 'alpha': self.alpha}
+            {"method": "heat", "t": self.heat_t}
+            if self.gdc_method == "heat"
+            else {"method": "ppr", "alpha": self.alpha}
         )
         # sparsification kwargs
-        if self.gdc_spars_method == 'topk':
-            spars_kwargs = {'method': 'topk', 'k': self.gdc_avg_degree, 'dim': 0}
+        if self.gdc_spars_method == "topk":
+            spars_kwargs = {"method": "topk", "k": self.gdc_avg_degree, "dim": 0}
         else:
-            spars_kwargs = {'method': 'threshold', 'eps': self.gdc_threshold_eps}
+            spars_kwargs = {"method": "threshold", "eps": self.gdc_threshold_eps}
 
         transform = GDC(
             self_loop_weight=1.0,
-            normalization_in='sym',
-            normalization_out='col',
+            normalization_in="sym",
+            normalization_out="col",
             diffusion_kwargs=diff_kwargs,
             sparsification_kwargs=spars_kwargs,
             exact=self.gdc_exact,
         )
         data_gdc = transform(self.data.clone())
         return to_scipy_sparse_matrix(
-            data_gdc.edge_index,
-            getattr(data_gdc, 'edge_attr', None),
-            num_nodes=N
+            data_gdc.edge_index, getattr(data_gdc, "edge_attr", None), num_nodes=N
         ).tocsr()
 
     def _prop_sgc(self) -> csr_matrix:
         """Simple graph convolution (SGC) by K-step power of normalized adjacency."""
         N = self.A.shape[0]
-        A_hat = self.A + identity(N, format='csr')
+        A_hat = self.A + identity(N, format="csr")
         row_sums = np.array(A_hat.sum(axis=1)).flatten()
         row_sums[row_sums == 0] = 1
         inv_sqrt = 1.0 / np.sqrt(row_sums)
@@ -276,7 +267,7 @@ class PropagationVarianceAnalyzer:
         j = np.arange(self.cheb_k + 1)
         xj = np.cos((2 * j + 1) * np.pi / (2 * (self.cheb_k + 1)))
         angles = np.arccos(xj)
-        T_prev, T_curr = identity(N, format='csr'), L_tilde
+        T_prev, T_curr = identity(N, format="csr"), L_tilde
         S = csr_matrix((N, N))
         for k in range(self.cheb_k + 1):
             T_k = T_prev if k == 0 else (T_curr if k == 1 else 2 * L_tilde @ T_curr - T_prev)
@@ -294,7 +285,7 @@ class PropagationVarianceAnalyzer:
         P = diags(1.0 / row_sums) @ self.A
         N = self.A.shape[0]
         S = csr_matrix((N, N))
-        P_power = identity(N, format='csr')
+        P_power = identity(N, format="csr")
         for k in range(self.gpr_k + 1):
             S += self.gpr_theta[k] * P_power
             P_power = P @ P_power
@@ -307,8 +298,8 @@ class PropagationVarianceAnalyzer:
         D_inv = diags(1.0 / row_sums)
         M = self.jacobi_alpha * (D_inv @ self.A)
         N = self.A.shape[0]
-        S = identity(N, format='csr')
-        M_power = identity(N, format='csr')
+        S = identity(N, format="csr")
+        M_power = identity(N, format="csr")
         for _ in range(self.jacobi_iters):
             M_power = M @ M_power
             S += M_power
@@ -317,13 +308,13 @@ class PropagationVarianceAnalyzer:
     def _prop_s2gc(self) -> csr_matrix:
         """Second-order graph convolution (S2GC)."""
         N = self.A.shape[0]
-        A_hat = self.A + identity(N, format='csr')
+        A_hat = self.A + identity(N, format="csr")
         row_sums = np.array(A_hat.sum(axis=1)).flatten()
         row_sums[row_sums == 0] = 1
         inv_sqrt = 1.0 / np.sqrt(row_sums)
         norm_A = diags(inv_sqrt) @ A_hat @ diags(inv_sqrt)
-        S = self.s2gc_alpha * identity(N, format='csr')
-        M_power = identity(N, format='csr')
+        S = self.s2gc_alpha * identity(N, format="csr")
+        M_power = identity(N, format="csr")
         for _ in range(self.s2gc_k):
             M_power = norm_A @ M_power
             S += (1.0 - self.s2gc_alpha) / self.s2gc_k * M_power
@@ -332,7 +323,7 @@ class PropagationVarianceAnalyzer:
     def compute_variance(self, method: Optional[str] = None) -> float:
         """Compute variance of the propagation matrix without densification."""
         m = (method or self.method).lower()
-        if m == 'all':
+        if m == "all":
             raise ValueError("Use compute_all() to get all methods")
         if m not in self.SUPPORTED:
             raise ValueError(f"Unknown method '{m}'")
@@ -341,18 +332,18 @@ class PropagationVarianceAnalyzer:
         S = self._cache[m]
         n = S.shape[0]
         total = float(S.sum())
-        sum_sq = float((S.data ** 2).sum())
+        sum_sq = float((S.data**2).sum())
         N2 = n * n
         mean = total / N2
         mean_sq = sum_sq / N2
-        variance = mean_sq - mean ** 2
+        variance = mean_sq - mean**2
         if variance < 0:
             variance = 0.0
         return float(max(variance, EPS))
 
     def compute_all(self) -> Dict[str, float]:
         """Compute variances for all supported propagation methods."""
-        return {m: self.compute_variance(m) for m in self.SUPPORTED if m != 'all'}
+        return {m: self.compute_variance(m) for m in self.SUPPORTED if m != "all"}
 
     def compute_layerwise_variances(self, depth: int, method: Optional[str] = None) -> np.ndarray:
         """
@@ -366,84 +357,96 @@ class PropagationVarianceAnalyzer:
             raise ValueError("depth must be a positive integer")
 
         m = (method or self.method).lower()
-        if m == 'all':
+        if m == "all":
             raise ValueError("Use a concrete propagation method, not 'all'.")
         if m not in self.SUPPORTED:
             raise ValueError(f"Unknown method '{m}'")
 
-        if m in {'gcn', 'gdc'}:
+        if m in {"gcn", "gdc"}:
             return np.full(depth, self.compute_variance(m), dtype=float)
 
-        if m == 'sgc':
+        if m == "sgc":
             original_k = self.sgc_k
             values = []
-            for k in range(1, depth + 1):
-                self.sgc_k = k
+            try:
+                for k in range(1, depth + 1):
+                    self.sgc_k = k
+                    self._clear_method_cache(m)
+                    values.append(self.compute_variance(m))
+            finally:
+                self.sgc_k = original_k
                 self._clear_method_cache(m)
-                values.append(self.compute_variance(m))
-            self.sgc_k = original_k
-            self._clear_method_cache(m)
             return np.asarray(values, dtype=float)
 
-        if m == 'appnp':
+        if m == "appnp":
             original_k = self.appnp_k
             values = []
-            for k in range(1, depth + 1):
-                self.appnp_k = k
+            try:
+                for k in range(1, depth + 1):
+                    self.appnp_k = k
+                    self._clear_method_cache(m)
+                    values.append(self.compute_variance(m))
+            finally:
+                self.appnp_k = original_k
                 self._clear_method_cache(m)
-                values.append(self.compute_variance(m))
-            self.appnp_k = original_k
-            self._clear_method_cache(m)
             return np.asarray(values, dtype=float)
 
-        if m == 'jacobiconv':
+        if m == "jacobiconv":
             original_iters = self.jacobi_iters
             values = []
-            for iters in range(1, depth + 1):
-                self.jacobi_iters = iters
+            try:
+                for iters in range(1, depth + 1):
+                    self.jacobi_iters = iters
+                    self._clear_method_cache(m)
+                    values.append(self.compute_variance(m))
+            finally:
+                self.jacobi_iters = original_iters
                 self._clear_method_cache(m)
-                values.append(self.compute_variance(m))
-            self.jacobi_iters = original_iters
-            self._clear_method_cache(m)
             return np.asarray(values, dtype=float)
 
-        if m == 's2gc':
+        if m == "s2gc":
             original_k = self.s2gc_k
             values = []
-            for k in range(1, depth + 1):
-                self.s2gc_k = k
+            try:
+                for k in range(1, depth + 1):
+                    self.s2gc_k = k
+                    self._clear_method_cache(m)
+                    values.append(self.compute_variance(m))
+            finally:
+                self.s2gc_k = original_k
                 self._clear_method_cache(m)
-                values.append(self.compute_variance(m))
-            self.s2gc_k = original_k
-            self._clear_method_cache(m)
             return np.asarray(values, dtype=float)
 
-        if m == 'chebnetii':
+        if m == "chebnetii":
             original_k = self.cheb_k
             original_theta = self.cheb_theta.copy()
             values = []
-            for k in range(1, depth + 1):
-                self.cheb_k = k
-                self.cheb_theta = self._uniform_theta(k)
+            try:
+                for k in range(1, depth + 1):
+                    self.cheb_k = k
+                    self.cheb_theta = self._uniform_theta(k)
+                    self._clear_method_cache(m)
+                    values.append(self.compute_variance(m))
+            finally:
+                self.cheb_k = original_k
+                self.cheb_theta = original_theta
                 self._clear_method_cache(m)
-                values.append(self.compute_variance(m))
-            self.cheb_k = original_k
-            self.cheb_theta = original_theta
-            self._clear_method_cache(m)
             return np.asarray(values, dtype=float)
 
-        if m == 'gprgnn':
+        if m == "gprgnn":
             original_k = self.gpr_k
             original_theta = self.gpr_theta.copy()
             values = []
-            for k in range(1, depth + 1):
-                self.gpr_k = k
-                self.gpr_theta = self._uniform_theta(k)
+            try:
+                for k in range(1, depth + 1):
+                    self.gpr_k = k
+                    self.gpr_theta = self._uniform_theta(k)
+                    self._clear_method_cache(m)
+                    values.append(self.compute_variance(m))
+            finally:
+                self.gpr_k = original_k
+                self.gpr_theta = original_theta
                 self._clear_method_cache(m)
-                values.append(self.compute_variance(m))
-            self.gpr_k = original_k
-            self.gpr_theta = original_theta
-            self._clear_method_cache(m)
             return np.asarray(values, dtype=float)
 
         raise ValueError(f"Layerwise variance is not implemented for method '{m}'")

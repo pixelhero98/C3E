@@ -16,6 +16,7 @@ class ChebIIConv(MessagePassing):
       - L_tilde = 2/Lambda_max * L - I  (scaled+shifted Laplacian, spectrum in [-1, 1])
       - T_0(x)=x, T_1(x)=L_tilde x, T_k(x)=2 L_tilde T_{k-1}(x) - T_{k-2}(x)
     """
+
     def __init__(
         self,
         in_channels: int,
@@ -59,7 +60,10 @@ class ChebIIConv(MessagePassing):
         if self._cached_lap is None or not self.cached:
             return True
         cached_edge_index, cached_edge_weight = self._cached_lap
-        return cached_edge_index.device != edge_index.device or cached_edge_weight.device != edge_index.device
+        return (
+            cached_edge_index.device != edge_index.device
+            or cached_edge_weight.device != edge_index.device
+        )
 
     def forward(
         self,
@@ -100,7 +104,7 @@ class ChebIIConv(MessagePassing):
         # Recursive Chebyshev propagation
         out = a[0] * x
         if self.K >= 1:
-            Tkm2 = x                          # T_0
+            Tkm2 = x  # T_0
             Tkm1 = self.propagate(lap_index, x=x, norm=lap_weight)  # T_1 = L_tilde x
             out = out + a[1] * Tkm1
 

@@ -1,4 +1,3 @@
-import torch
 import torch.nn.functional as F
 from torch import Tensor
 from typing import Optional
@@ -82,7 +81,9 @@ class APPNPConv(MessagePassing):
                     and (cache[1] is None or cache[1].device == x.device)
                 )
                 if not cache_valid:
-                    add_loops = self.add_self_loops and (not self._tensor_has_self_loops(edge_index))
+                    add_loops = self.add_self_loops and (
+                        not self._tensor_has_self_loops(edge_index)
+                    )
                     edge_index, edge_weight = gcn_norm(
                         edge_index=edge_index,
                         edge_weight=edge_weight,
@@ -126,11 +127,13 @@ class APPNPConv(MessagePassing):
                         ew = F.dropout(ew, p=self.dropout, training=True)
                         edge_index = set_sparse_value(edge_index, ew)
                     else:
-                        assert edge_weight is not None
+                        if edge_weight is None:
+                            raise ValueError("edge_weight is required for edge dropout.")
                         edge_weight = F.dropout(edge_weight, p=self.dropout, training=True)
                 else:
                     val = edge_index.storage.value()
-                    assert val is not None
+                    if val is None:
+                        raise ValueError("SparseTensor edge values are required for edge dropout.")
                     val = F.dropout(val, p=self.dropout, training=True)
                     edge_index = edge_index.set_value(val, layout="coo")
 
