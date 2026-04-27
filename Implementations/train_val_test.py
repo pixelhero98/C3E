@@ -40,16 +40,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from Model_factory.activations import (  # noqa: E402
+    ACTIVATION_KINDS,
+    ACTIVATION_MODE_CHOICES,
+    activation_flags,
+    normalize_activation_mode,
+)
 from Model_factory.model import Model  # noqa: E402
 from Visualizations.entropy_energy import dirichlet_energy, representation_entropy  # noqa: E402
 
 if __package__:
     from .c3e import ChanCapConEst
-    from .propanalyzer import PropagationVarianceAnalyzer
+    from .propanalyzer import PropagationVarianceAnalyzer, apply_variance_guard
     from .utility import create_masks, save_checkpoint, test, train, val
 else:
     from c3e import ChanCapConEst
-    from propanalyzer import PropagationVarianceAnalyzer
+    from propanalyzer import PropagationVarianceAnalyzer, apply_variance_guard
     from utility import create_masks, save_checkpoint, test, train, val
 
 
@@ -152,10 +158,36 @@ def parse_args() -> argparse.Namespace:
         help="Use one global propagation variance or layer-wise variances.",
     )
     parser.add_argument(
+        "--variance_guard_ratio",
+        type=float,
+        default=0.95,
+        help=(
+            "Layerwise variance guard ratio in [0, 1]. "
+            "Use 0 to disable; default 0.95 floors sigma[l] by 0.95*sigma[l-1]."
+        ),
+    )
+    parser.add_argument(
+        "--activation_mode",
+        choices=ACTIVATION_MODE_CHOICES,
+        default="first-on",
+        help="Activation placement: first-on, all-on, all-off, or legacy aliases.",
+    )
+    parser.add_argument(
+        "--activation_kind",
+        choices=ACTIVATION_KINDS,
+        default="prelu",
+        help="Hidden activation function used by estimated architectures.",
+    )
+    parser.add_argument(
         "--device", choices=["cpu", "cuda"], default="cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not 0.0 <= args.variance_guard_ratio <= 1.0:
+        parser.error("--variance_guard_ratio must be in [0.0, 1.0].")
+    args.activation_mode = normalize_activation_mode(args.activation_mode)
+    args.activation_kind = args.activation_kind.strip().lower()
+    return args
 
 
 def setup_logging(save_dir: Path) -> None:
@@ -194,6 +226,48 @@ def load_dataset(args: argparse.Namespace):
     return dataset_class(name=args.dataset, transform=T.AddSelfLoops())
 
 
+def apply_training_graph_transform(data: Data, args: argparse.Namespace) -> Data:
+    """Apply graph-operation-specific preprocessing used by the training graph."""
+    if args.prop_method != "gdc":
+        return data
+
+    transform = T.GDC(
+        self_loop_weight=1.0,
+        normalization_in="sym",
+        normalization_out="col",
+        diffusion_kwargs={"method": "ppr", "alpha": 0.05},
+        sparsification_kwargs={"method": "topk", "k": 64, "dim": 0},
+        exact=True,
+    )
+    transformed = transform(data.clone())
+    logging.info(
+        "Applied GDC training transform: edges %d -> %d",
+        int(data.edge_index.size(1)),
+        int(transformed.edge_index.size(1)),
+    )
+    return transformed
+
+
+def filter_penalty_solutions(
+    rounded_layers: Sequence[Sequence[int]],
+    dropout_schedules: Sequence[Sequence[float]],
+    channel_caps: Sequence[float],
+    penalty: float,
+) -> Tuple[List[Sequence[int]], List[Sequence[float]], List[float], int]:
+    """Drop architectures whose capacity is still the optimizer penalty sentinel."""
+    penalty_cutoff = -0.5 * penalty
+    valid_solutions = [
+        (layers, dropout, capacity)
+        for layers, dropout, capacity in zip(rounded_layers, dropout_schedules, channel_caps)
+        if capacity > penalty_cutoff
+    ]
+    skipped_count = len(rounded_layers) - len(valid_solutions)
+    if not valid_solutions:
+        return [], [], [], skipped_count
+    layers, dropouts, capacities = zip(*valid_solutions)
+    return list(layers), list(dropouts), list(capacities), skipped_count
+
+
 def run_solution(
     data: Data,
     dataset,
@@ -211,12 +285,17 @@ def run_solution(
     sol_dir.mkdir(parents=True, exist_ok=True)
 
     conv_method = CONV_METHOD_ALIASES.get(args.prop_method, args.prop_method)
+    activation_mode = normalize_activation_mode(getattr(args, "activation_mode", "first-on"))
+    activation_kind = getattr(args, "activation_kind", "prelu")
+    use_activations = activation_flags(activation_mode, len(prop_layer_sizes))
 
     model = Model(
         prop_layer=[data.x.shape[1]] + prop_layer_sizes,
         num_class=dataset.num_classes,
         drop_probs=drop_probs,
-        use_activations=[True] * len(prop_layer_sizes),
+        use_activations=use_activations,
+        activation_mode=activation_mode,
+        activation_kind=activation_kind,
         conv_methods=conv_method,
     ).to(args.device)
 
@@ -230,7 +309,6 @@ def run_solution(
         mode="max",
         factor=0.5,
         patience=10,
-        verbose=False,
     )
 
     best_val, best_test = float("-inf"), 0.0
@@ -269,6 +347,11 @@ def run_solution(
                     best_val=best_val,
                     layer_sizes=prop_layer_sizes,
                     dropout=drop_probs,
+                    extra_metadata={
+                        "activation_mode": activation_mode,
+                        "activation_kind": activation_kind,
+                        "use_activations": use_activations,
+                    },
                 )
             else:
                 epochs_no_improve += 1
@@ -333,10 +416,23 @@ def main() -> None:
         sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
         logging.info("Using global propagation variance sigma_s=%.6e", sigma_s)
     else:
-        sigma_s = analyzer.compute_layerwise_variances(depth=args.max_layers)
-        sigma_s = np.maximum(sigma_s, float(np.finfo(np.float64).eps))
+        raw_sigma_s = analyzer.compute_layerwise_variances(depth=args.max_layers)
+        raw_sigma_s = np.maximum(raw_sigma_s, float(np.finfo(np.float64).eps))
+        sigma_s = apply_variance_guard(raw_sigma_s, args.variance_guard_ratio)
+        changed = int(np.sum(sigma_s > raw_sigma_s))
         logging.info(
-            "Using layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
+            "Raw layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
+            np.array2string(raw_sigma_s[:5], precision=3, separator=", "),
+            len(raw_sigma_s),
+        )
+        logging.info(
+            "Using variance guard ratio=%.3f; changed %d/%d layer variance(s)",
+            args.variance_guard_ratio,
+            changed,
+            len(raw_sigma_s),
+        )
+        logging.info(
+            "Guarded layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
             np.array2string(sigma_s[:5], precision=3, separator=", "),
             len(sigma_s),
         )
@@ -373,6 +469,19 @@ def main() -> None:
         )
         raise RuntimeError("Optimiser produced mismatched component lengths.")
 
+    rounded_layers, dropout_schedules, channel_caps, skipped_count = filter_penalty_solutions(
+        rounded_layers,
+        dropout_schedules,
+        channel_caps,
+        optimiser.penalty,
+    )
+    if skipped_count:
+        logging.warning("Skipped %d penalty-state architecture(s).", skipped_count)
+    if not rounded_layers:
+        message = "No non-penalty architectures produced by capacity estimator."
+        logging.error(message)
+        raise RuntimeError(message)
+
     if args.dataset not in {"ogbn-arxiv", "ogbn-papers100M"}:
         data.train_mask, data.val_mask, data.test_mask = create_masks(
             data,
@@ -392,6 +501,7 @@ def main() -> None:
         data.val_mask[valid_idx] = True
         data.test_mask[test_idx] = True
 
+    data = apply_training_graph_transform(data, args)
     data = data.to(args.device)
     for layers, dropout, channel_capacity in zip(rounded_layers, dropout_schedules, channel_caps):
         best_val, test_at_best_val, checkpoint = run_solution(
@@ -421,7 +531,7 @@ def main() -> None:
         best_checkpoint,
     )
 
-    use_activations = [True] * len(best_layers)
+    use_activations = activation_flags(args.activation_mode, len(best_layers))
     prop_layers = [data.x.shape[1]] + best_layers
 
     rep_entropy = representation_entropy(

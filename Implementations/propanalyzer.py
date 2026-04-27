@@ -16,6 +16,23 @@ from torch_geometric.utils import (
 EPS = np.finfo(np.float64).eps
 
 
+def apply_variance_guard(variances, ratio: float = 0.95) -> np.ndarray:
+    """Floor each layer variance by ``ratio`` times the previous guarded layer."""
+
+    if not 0.0 <= ratio <= 1.0:
+        raise ValueError("variance guard ratio must be in [0.0, 1.0].")
+
+    guarded = np.asarray(variances, dtype=float).copy().ravel()
+    if guarded.size == 0 or ratio == 0.0:
+        return guarded
+    if np.any(~np.isfinite(guarded)) or np.any(guarded <= 0):
+        raise ValueError("All variances must be positive and finite.")
+
+    for idx in range(1, guarded.size):
+        guarded[idx] = max(guarded[idx], ratio * guarded[idx - 1])
+    return guarded
+
+
 def scaled_laplacian(A_csr: csr_matrix) -> csr_matrix:
     """Compute scaled Laplacian."""
     row_sums = np.array(A_csr.sum(axis=1)).flatten()
@@ -50,7 +67,7 @@ class PropagationVarianceAnalyzer:
         gdc_spars_method: str = "topk",
         gdc_avg_degree: int = 64,
         gdc_threshold_eps: float = 1e-4,
-        gdc_exact: bool = False,
+        gdc_exact: bool = True,
         # SGC
         sgc_k: int = 2,
         # ChebNet II

@@ -9,6 +9,8 @@ __all__ = ["ChanCapConEst"]
 
 
 TINY = 1e-12
+PENALTY_TOL = 0.5
+OPTIMIZER_WIDTH_BOUND = 1e5
 
 
 def _as_positive_array(values: Iterable[float]) -> np.ndarray:
@@ -96,6 +98,19 @@ class ChanCapConEst:
             return float(self.M)
 
         return float(self.M * (self.d ** (1.0 / self.d)))
+
+    def regularized_width_guard(self) -> float:
+        """Return the soft per-layer width guard used by the objective penalty."""
+        guard = float(self.regularized_feature_dim() + 1.0)
+        if guard < 2.0:
+            raise ValueError(
+                f"Regularized width guard {guard:.6g} is below the minimum hidden width of 2."
+            )
+        return guard
+
+    def width_upper_bound(self) -> int:
+        """Return the integer part of the regularized width guard for reporting."""
+        return int(np.floor(self.regularized_width_guard()))
 
     def _layer_variances(self, length: int) -> np.ndarray:
         """Return per-layer variance values for the given network depth."""
@@ -217,6 +232,36 @@ class ChanCapConEst:
 
         return float(phi0 - H)
 
+    def _initial_widths(self, length: int, width_guard: float) -> List[np.ndarray]:
+        """Build several feasible starts so SLSQP avoids flat penalty corners."""
+
+        starts: List[np.ndarray] = []
+
+        def add_constant(value: float) -> None:
+            value = float(np.clip(value, 2.0, width_guard * 0.98))
+            starts.append(np.full(length, value, dtype=float))
+
+        add_constant(2.0)
+        add_constant(np.sqrt(float(self.M) * width_guard))
+        add_constant(0.25 * width_guard)
+        add_constant(0.50 * width_guard)
+        add_constant(0.80 * width_guard)
+        add_constant(0.95 * width_guard)
+        starts.append(
+            np.linspace(0.95 * width_guard, max(2.0, 0.20 * width_guard), length)
+        )
+        return starts
+
+    def _solution_payload(
+        self,
+        weights: np.ndarray,
+        entropy: float,
+    ) -> Tuple[List[int], List[float], float]:
+        """Format one floating-point optimizer result for callers."""
+
+        rounded_weights = [int(round(wi)) for wi in weights]
+        return rounded_weights, self.dropouts(weights.tolist()), entropy
+
     def optimize_weights(
         self, H: float, verbose: bool = False, max_layers: int = 100
     ) -> Tuple[List[List[int]], List[List[float]], List[float]]:
@@ -228,59 +273,91 @@ class ChanCapConEst:
         all_rounded: List[List[int]] = []
         all_dropouts: List[List[float]] = []
         all_channel_capacity: List[float] = []
+        width_guard = self.regularized_width_guard()
+        upper_phi0 = H / self.eta if H > 0 else float("inf")
 
         for L in range(2, max_layers + 1):
-            w0 = np.full(L, 2.0)
-            upper = max(float(self.M + 1.0), float((self.N - 1) * self.M))
-            if upper <= 2.0:
-                upper = 2.0 + 1.0
-            bounds = [(2.0, upper)] * L
+            bounds = [(2.0, OPTIMIZER_WIDTH_BOUND)] * L
             cons = {"type": "ineq", "fun": lambda w, H=H: self.constraint(w, H)}
+            valid_results: List[Tuple[float, float, np.ndarray]] = []
+            above_upper = False
 
-            result = minimize(
-                fun=self.objective,
-                x0=w0,
-                method="SLSQP",
-                bounds=bounds,
-                constraints=[cons],
-                options={"ftol": 1e-6, "maxiter": 100},
-            )
+            for w0 in self._initial_widths(L, width_guard):
+                result = minimize(
+                    fun=self.objective,
+                    x0=w0,
+                    method="SLSQP",
+                    bounds=bounds,
+                    constraints=[cons],
+                    options={"ftol": 1e-6, "maxiter": 300},
+                )
 
-            if not result.success:
+                if not result.success:
+                    if verbose:
+                        print(f"[L={L}] Optimization failed: {result.message}")
+                    continue
+
+                weights = np.asarray(result.x, dtype=float)
+                phi0 = self.constraint(weights, H) + H
+                objective_value = self.objective(weights)
+
+                if objective_value >= self.penalty * PENALTY_TOL:
+                    if verbose:
+                        print(f"[L={L}] Rejected penalty-state solution.")
+                    continue
+
+                if phi0 > upper_phi0:
+                    above_upper = True
+                    if verbose:
+                        print(
+                            f"[L={L}] Rejected above-window solution: "
+                            f"{phi0:.4f} > {upper_phi0:.4f}."
+                        )
+                    continue
+
+                if phi0 < H:
+                    if verbose:
+                        print(
+                            f"[L={L}] Rejected below-window solution: "
+                            f"{phi0:.4f} < {H:.4f}."
+                        )
+                    continue
+
+                valid_results.append((-objective_value, phi0, weights))
+
+            if valid_results:
+                entropy, phi0, weights = max(valid_results, key=lambda item: item[0])
+                rounded_weights, dropout_probs, entropy = self._solution_payload(
+                    weights,
+                    entropy,
+                )
+                all_rounded.append(rounded_weights)
+                all_dropouts.append(dropout_probs)
+                all_channel_capacity.append(entropy)
+
                 if verbose:
-                    print(f"[L={L}] Optimization failed: {result.message}")
+                    print("\n=== Estimation Summary ===")
+                    print(f"Depth                : {L}")
+                    print(f"Hidden dimensions    : {weights.tolist()}")
+                    print(f"Rounded hidden dims  : {rounded_weights}")
+                    print(f"Network channel capacity: {entropy:.4f}")
+                    print(
+                        f"Lower bound          : {phi0:.4f} in [{H:.4f}, {upper_phi0:.4f}]"
+                    )
+                    print(f"Dropout probabilities: {dropout_probs}")
+                    print(
+                        f"Rep. compression     : "
+                        f"{self.rep_compression_ratio(weights.tolist(), entropy):.4f}"
+                    )
                 continue
 
-            weights = result.x
-            constraint_val = self.constraint(weights, H)
-            entropy = -self.objective(weights)
-
-            # compute rounded hidden dimensions and dropout probabilities
-            rounded_weights = [int(round(wi)) for wi in weights]
-            dropout_probs = self.dropouts(weights.tolist())
-
-            all_rounded.append(rounded_weights)
-            all_dropouts.append(dropout_probs)
-            all_channel_capacity.append(entropy)
-
-            if verbose:
-                print("\n=== Estimation Summary ===")
-                print(f"Depth                : {L}")
-                print(f"Hidden dimensions    : {weights.tolist()}")
-                print(f"Rounded hidden dims  : {rounded_weights}")
-                print(f"Network channel capacity: {entropy:.4f}")
-                print(
-                    f"Lower bound          : {constraint_val + H:.4f} in [{H:.4f}, {(H / self.eta):.4f}]"
-                )
-                print(f"Dropout probabilities: {dropout_probs}")
-                print(
-                    f"Rep. compression     : {self.rep_compression_ratio(weights.tolist(), entropy):.4f}"
-                )
-
-            # return all results up to the first L that meets the constraint
-            if constraint_val + H > H / self.eta:
+            if above_upper and all_rounded:
                 return (all_rounded, all_dropouts, all_channel_capacity)
 
+        if all_rounded:
+            return (all_rounded, all_dropouts, all_channel_capacity)
+
         raise RuntimeError(
-            f"Failed to meet lower bound constraint H={H} within {max_layers} layers."
+            f"Failed to produce a non-penalty solution inside valid window "
+            f"[{H}, {upper_phi0}] within {max_layers} layers."
         )

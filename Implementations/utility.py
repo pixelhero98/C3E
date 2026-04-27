@@ -258,8 +258,16 @@ def compute_sparse_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTensor
     values = torch.ones(row.size(0), device=row.device, dtype=torch.float32)
     adjacency = SparseTensor(row=row, col=col, value=values, sparse_sizes=(num_nodes, num_nodes))
     deg = adjacency.sum(dim=1)
-    degree_matrix = SparseTensor.diag(deg)
-    return degree_matrix - adjacency
+    node_ids = torch.arange(num_nodes, device=row.device)
+    lap_row = torch.cat([node_ids, row])
+    lap_col = torch.cat([node_ids, col])
+    lap_values = torch.cat([deg, -values])
+    return SparseTensor(
+        row=lap_row,
+        col=lap_col,
+        value=lap_values,
+        sparse_sizes=(num_nodes, num_nodes),
+    ).coalesce()
 
 
 def compute_normalized_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTensor:
@@ -269,10 +277,17 @@ def compute_normalized_laplacian(edge_index: Tensor, num_nodes: int) -> SparseTe
     deg = adjacency.sum(dim=1)
     deg_inv_sqrt = deg.pow(-0.5)
     deg_inv_sqrt[deg_inv_sqrt == float("inf")] = 0
-    deg_inv_sqrt_matrix = SparseTensor.diag(deg_inv_sqrt)
-    identity = SparseTensor.eye(num_nodes, device=deg.device)
-    normalized_adj = deg_inv_sqrt_matrix @ adjacency @ deg_inv_sqrt_matrix
-    return identity - normalized_adj
+    node_ids = torch.arange(num_nodes, device=row.device)
+    normalized_values = -deg_inv_sqrt[row] * values * deg_inv_sqrt[col]
+    lap_row = torch.cat([node_ids, row])
+    lap_col = torch.cat([node_ids, col])
+    lap_values = torch.cat([torch.ones(num_nodes, device=row.device, dtype=values.dtype), normalized_values])
+    return SparseTensor(
+        row=lap_row,
+        col=lap_col,
+        value=lap_values,
+        sparse_sizes=(num_nodes, num_nodes),
+    ).coalesce()
 
 
 def compute_laplacian(edge_index: Tensor, num_nodes: int, normalized: bool = True) -> SparseTensor:
@@ -309,6 +324,7 @@ def save_checkpoint(
     best_val: float,
     layer_sizes: Sequence[int],
     dropout: Sequence[float],
+    extra_metadata: Optional[dict] = None,
 ) -> Path:
     checkpoint = {
         "epoch": epoch,
@@ -319,6 +335,8 @@ def save_checkpoint(
         "layer_sizes": layer_sizes,
         "dropout": dropout,
     }
+    if extra_metadata:
+        checkpoint.update(extra_metadata)
     ckpt_path = sol_dir / f"best_val_{layer_str}_ep{epoch}.pt"
     torch.save(checkpoint, ckpt_path)
     logging.info("Saved checkpoint: %s", ckpt_path)
