@@ -5,6 +5,7 @@ from Model_factory.chebiiconv import ChebIIConv
 from Model_factory.gprconv import GPRConv
 from Model_factory.jacobiconv import JACOBIConv
 from Model_factory.appnpconv import APPNPConv
+from Model_factory.activations import activation_flags, build_activation, normalize_activation_mode
 
 
 class Model(nn.Module):
@@ -15,6 +16,8 @@ class Model(nn.Module):
         drop_probs,
         use_activations=None,
         conv_methods=None,
+        activation_mode="first-on",
+        activation_kind="prelu",
     ):
         super().__init__()
 
@@ -103,13 +106,15 @@ class Model(nn.Module):
                 else:
                     self.propagation.append(Conv(prop_layer[i], prop_layer[i + 1]))
 
+        self.activation_mode = normalize_activation_mode(activation_mode)
+        self.activation_kind = str(activation_kind).strip().lower()
         self.activations = nn.ModuleList(
-            [nn.PReLU(num_parameters=prop_layer[i + 1]) for i in range(self.num_layers)]
+            [build_activation(self.activation_kind, prop_layer[i + 1]) for i in range(self.num_layers)]
         )
 
         # Activation enable/disable flags
         if use_activations is None:
-            self.use_activations = [True] * self.num_layers
+            self.use_activations = activation_flags(self.activation_mode, self.num_layers)
         elif isinstance(use_activations, bool):
             self.use_activations = [use_activations] * self.num_layers
         else:
