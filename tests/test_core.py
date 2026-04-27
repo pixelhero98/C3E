@@ -200,16 +200,16 @@ def test_apply_variance_guard_rejects_invalid_ratio():
 
 def test_variance_guard_defaults_remain_enabled(monkeypatch):
     from Implementations.train_val_test import parse_args as parse_train_args
-    from tools.inspect_cora_gat_c3e import parse_args as parse_gat_estimation_args
-    from tools.run_cora_eta045_all_ops import parse_args as parse_all_ops_args
+    from tools.inspect_gat_c3e import parse_args as parse_gat_estimation_args
+    from tools.run_all_ops import parse_args as parse_all_ops_args
 
     monkeypatch.setattr("sys.argv", ["train_val_test.py"])
     assert parse_train_args().variance_guard_ratio == pytest.approx(0.95)
 
-    monkeypatch.setattr("sys.argv", ["inspect_cora_gat_c3e.py"])
+    monkeypatch.setattr("sys.argv", ["inspect_gat_c3e.py"])
     assert parse_gat_estimation_args().variance_guard_ratio == pytest.approx(0.95)
 
-    monkeypatch.setattr("sys.argv", ["run_cora_eta045_all_ops.py"])
+    monkeypatch.setattr("sys.argv", ["run_all_ops.py"])
     assert parse_all_ops_args().variance_guard_ratio == pytest.approx(0.95)
 
 
@@ -279,7 +279,8 @@ def test_load_dataset_does_not_require_ogb_for_cora(monkeypatch, tmp_path):
     pytest.importorskip("torch_geometric")
     pytest.importorskip("tqdm")
 
-    module = importlib.import_module("Implementations.train_val_test")
+    module = importlib.import_module("Implementations.datasets")
+    trainer = importlib.import_module("Implementations.train_val_test")
     sentinel = object()
 
     def fake_planetoid(root, name, transform):
@@ -295,7 +296,7 @@ def test_load_dataset_does_not_require_ogb_for_cora(monkeypatch, tmp_path):
 
     args = SimpleNamespace(dataset="Cora", data_root=tmp_path)
 
-    assert module.load_dataset(args) is sentinel
+    assert trainer.load_dataset(args) is sentinel
 
 
 def test_load_dataset_reports_missing_ogb(monkeypatch, tmp_path):
@@ -303,7 +304,8 @@ def test_load_dataset_reports_missing_ogb(monkeypatch, tmp_path):
     pytest.importorskip("torch_geometric")
     pytest.importorskip("tqdm")
 
-    module = importlib.import_module("Implementations.train_val_test")
+    module = importlib.import_module("Implementations.datasets")
+    trainer = importlib.import_module("Implementations.train_val_test")
 
     def missing_ogb(name):
         raise ModuleNotFoundError("No module named 'ogb'")
@@ -313,7 +315,7 @@ def test_load_dataset_reports_missing_ogb(monkeypatch, tmp_path):
     args = SimpleNamespace(dataset="ogbn-arxiv", data_root=tmp_path)
 
     with pytest.raises(ModuleNotFoundError, match="ogb is required for ogbn-\\* datasets"):
-        module.load_dataset(args)
+        trainer.load_dataset(args)
 
 
 def test_gdc_training_transform_uses_analyzer_defaults(monkeypatch):
@@ -465,7 +467,7 @@ def test_run_solution_preserves_original_training_error(monkeypatch, tmp_path):
 
 
 def test_gat_candidate_snap_width_down_rounds_to_positive_multiple():
-    from tools.run_cora_gat_c3e_candidates import snap_width_down
+    from tools.run_gat_c3e_candidates import snap_width_down
 
     assert snap_width_down(2053, 4) == 2052
     assert snap_width_down(1164, 4) == 1164
@@ -477,7 +479,7 @@ def test_deep_residual_gat_validates_dropout_length():
     pytest.importorskip("torch")
     pytest.importorskip("torch_geometric")
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     with pytest.raises(ValueError, match="dropouts length"):
         DeepResidualGAT(
@@ -494,7 +496,7 @@ def test_deep_residual_gat_activation_modes():
     pytest.importorskip("torch")
     pytest.importorskip("torch_geometric")
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     first_only = DeepResidualGAT(
         in_channels=3,
@@ -537,7 +539,7 @@ def test_deep_residual_gat_defaults_to_first_on_activation():
     pytest.importorskip("torch")
     pytest.importorskip("torch_geometric")
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     model = DeepResidualGAT(
         in_channels=3,
@@ -556,7 +558,7 @@ def test_deep_residual_gat_activation_kinds_construct_expected_modules():
     torch = pytest.importorskip("torch")
     pytest.importorskip("torch_geometric")
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT, build_activation
+    from tools.run_gat_c3e_candidates import DeepResidualGAT, build_activation
 
     assert isinstance(build_activation("prelu", 4), torch.nn.PReLU)
     assert isinstance(build_activation("silu", 4), torch.nn.SiLU)
@@ -584,7 +586,7 @@ def test_deep_residual_gat_rejects_invalid_activation_mode():
     pytest.importorskip("torch")
     pytest.importorskip("torch_geometric")
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     with pytest.raises(ValueError, match="activation_mode"):
         DeepResidualGAT(
@@ -602,7 +604,7 @@ def test_deep_residual_gat_rejects_invalid_activation_kind():
     pytest.importorskip("torch")
     pytest.importorskip("torch_geometric")
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     with pytest.raises(ValueError, match="activation_kind"):
         DeepResidualGAT(
@@ -617,11 +619,11 @@ def test_deep_residual_gat_rejects_invalid_activation_kind():
 
 
 def test_gat_candidate_cli_rejects_invalid_activation_mode(monkeypatch):
-    from tools.run_cora_gat_c3e_candidates import parse_args
+    from tools.run_gat_c3e_candidates import parse_args
 
     monkeypatch.setattr(
         "sys.argv",
-        ["run_cora_gat_c3e_candidates.py", "--activation-mode", "middle"],
+        ["run_gat_c3e_candidates.py", "--activation-mode", "middle"],
     )
 
     with pytest.raises(SystemExit) as exc_info:
@@ -631,11 +633,11 @@ def test_gat_candidate_cli_rejects_invalid_activation_mode(monkeypatch):
 
 
 def test_gat_candidate_cli_rejects_invalid_activation_kind(monkeypatch):
-    from tools.run_cora_gat_c3e_candidates import parse_args
+    from tools.run_gat_c3e_candidates import parse_args
 
     monkeypatch.setattr(
         "sys.argv",
-        ["run_cora_gat_c3e_candidates.py", "--activation-kind", "relu"],
+        ["run_gat_c3e_candidates.py", "--activation-kind", "relu"],
     )
 
     with pytest.raises(SystemExit) as exc_info:
@@ -648,7 +650,7 @@ def test_deep_residual_gat_tiny_forward_shape():
     torch = pytest.importorskip("torch")
     Data = pytest.importorskip("torch_geometric.data").Data
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     model = DeepResidualGAT(
         in_channels=3,
@@ -674,7 +676,7 @@ def test_deep_residual_gat_tiny_forward_shape_for_new_activation_kinds(activatio
     torch = pytest.importorskip("torch")
     Data = pytest.importorskip("torch_geometric.data").Data
 
-    from tools.run_cora_gat_c3e_candidates import DeepResidualGAT
+    from tools.run_gat_c3e_candidates import DeepResidualGAT
 
     model = DeepResidualGAT(
         in_channels=3,
@@ -700,7 +702,7 @@ def test_gat_candidate_training_records_activation_kind(tmp_path):
     torch = pytest.importorskip("torch")
     Data = pytest.importorskip("torch_geometric.data").Data
 
-    from tools.run_cora_gat_c3e_candidates import Candidate, train_candidate
+    from tools.run_gat_c3e_candidates import Candidate, train_candidate
 
     data = Data(
         x=torch.randn(3, 3),
@@ -749,7 +751,7 @@ def test_gat_candidate_training_records_activation_kind(tmp_path):
 
 
 def test_gat_activation_grid_expands_to_nine_activation_combinations():
-    from tools.run_cora_gat_activation_grid import activation_combinations
+    from tools.run_gat_activation_grid import activation_combinations
 
     combos = activation_combinations()
 
@@ -760,8 +762,53 @@ def test_gat_activation_grid_expands_to_nine_activation_combinations():
 
 
 def test_gat_activation_grid_deduplicates_alias_modes():
-    from tools.run_cora_gat_activation_grid import activation_combinations
+    from tools.run_gat_activation_grid import activation_combinations
 
     combos = activation_combinations(["first-on", "first-only", "all"], ["prelu"])
 
     assert combos == [("first-on", "prelu"), ("all-on", "prelu")]
+
+
+def test_dataset_slug_and_choices_are_shared():
+    from Implementations.datasets import DATASET_CHOICES, dataset_slug
+
+    assert "Cora" in DATASET_CHOICES
+    assert "ogbn-arxiv" in DATASET_CHOICES
+    assert dataset_slug("ogbn-arxiv") == "ogbn_arxiv"
+
+
+def test_latest_candidate_summary_filters_by_dataset(tmp_path):
+    from tools.run_gat_c3e_candidates import latest_candidate_summary
+
+    cora = tmp_path / "cora_gat_c3e_eta0p45_1"
+    cite = tmp_path / "citeseer_gat_c3e_eta0p45_1"
+    cora.mkdir()
+    cite.mkdir()
+    (cora / "summary.csv").write_text("depth,widths,dropouts,phi0,channel_capacity\n", encoding="utf-8")
+    (cite / "summary.csv").write_text("depth,widths,dropouts,phi0,channel_capacity\n", encoding="utf-8")
+
+    assert latest_candidate_summary(tmp_path, "CiteSeer") == cite / "summary.csv"
+    assert latest_candidate_summary(tmp_path, "Cora") == cora / "summary.csv"
+
+
+def test_generic_tool_run_names_include_dataset():
+    from tools.inspect_architectures import run_name as architecture_run_name
+    from tools.inspect_gat_c3e import run_name as gat_estimation_run_name
+    from tools.run_all_ops import run_name as all_ops_run_name
+    from tools.run_gat_activation_grid import run_name as grid_run_name
+    from tools.run_gat_c3e_candidates import run_name as train_run_name
+    from tools.run_gat_variance_probe import run_name as probe_run_name
+
+    args = SimpleNamespace(dataset="CiteSeer", eta=0.45, variance_guard_ratio=0.95, run_name=None)
+    assert architecture_run_name(args).startswith("citeseer_architectures_")
+    assert gat_estimation_run_name(args).startswith("citeseer_gat_c3e_")
+
+    args = SimpleNamespace(dataset="CiteSeer", eta=0.45, run_name=None)
+    assert all_ops_run_name(args).startswith("citeseer_eta0p45_all_ops_")
+
+    args = SimpleNamespace(dataset="CiteSeer", heads=2, run_name=None)
+    assert grid_run_name(args).startswith("citeseer_gat_c3e_activation_grid_h2_")
+
+    args = SimpleNamespace(dataset="CiteSeer", run_name=None)
+    assert train_run_name(args).startswith("citeseer_gat_c3e_train_")
+    assert probe_run_name(args).startswith("citeseer_gat_variance_probe_")
