@@ -23,7 +23,6 @@ import argparse
 import logging
 import random
 import sys
-from importlib import import_module
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -32,7 +31,6 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch_geometric.transforms as T
 from torch_geometric.data import Data
-from torch_geometric.datasets import Amazon, Planetoid, WikipediaNetwork
 from tqdm import tqdm
 
 # Ensure repository-local imports work regardless of invocation directory.
@@ -51,12 +49,14 @@ from Visualizations.entropy_energy import dirichlet_energy, representation_entro
 
 if __package__:
     from .c3e import ChanCapConEst
+    from .datasets import DATASET_CHOICES, apply_node_splits, load_node_dataset
     from .propanalyzer import PropagationVarianceAnalyzer, apply_variance_guard
-    from .utility import create_masks, save_checkpoint, test, train, val
+    from .utility import save_checkpoint, test, train, val
 else:
     from c3e import ChanCapConEst
+    from datasets import DATASET_CHOICES, apply_node_splits, load_node_dataset
     from propanalyzer import PropagationVarianceAnalyzer, apply_variance_guard
-    from utility import create_masks, save_checkpoint, test, train, val
+    from utility import save_checkpoint, test, train, val
 
 
 CONV_METHOD_ALIASES = {
@@ -69,17 +69,6 @@ CONV_METHOD_ALIASES = {
     "jacobiconv": "jacobiconv",
     "s2gc": "s2gc",
 }
-
-
-def _load_ogb_dataset_class():
-    """Load the OGB dataset class only when an OGB dataset is requested."""
-    try:
-        module = import_module("ogb.nodeproppred")
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "ogb is required for ogbn-* datasets. Install ogb or choose a non-OGB dataset."
-        ) from exc
-    return module.PygNodePropPredDataset
 
 
 def set_seed(seed: int) -> None:
@@ -112,18 +101,8 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         type=str,
         default="Cora",
-        choices=[
-            "Cora",
-            "CiteSeer",
-            "PubMed",
-            "Chameleon",
-            "Squirrel",
-            "AmazonPhoto",
-            "AmazonComputers",
-            "ogbn-arxiv",
-            "ogbn-papers100M",
-        ],
-        help="Planetoid dataset name",
+        choices=DATASET_CHOICES,
+        help="Node-classification dataset name",
     )
     parser.add_argument("--epochs", type=int, default=500, help="Maximum number of training epochs")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
@@ -213,17 +192,7 @@ def _format_layers(layers: Sequence[int]) -> str:
 
 def load_dataset(args: argparse.Namespace):
     """Construct the dataset requested by the CLI arguments."""
-    if args.dataset in {"Cora", "CiteSeer", "PubMed"}:
-        return Planetoid(str(args.data_root), name=args.dataset, transform=T.AddSelfLoops())
-    if args.dataset in {"AmazonPhoto", "AmazonComputers"}:
-        amazon_name = "Photo" if args.dataset == "AmazonPhoto" else "Computers"
-        return Amazon(str(args.data_root), name=amazon_name, transform=T.AddSelfLoops())
-    if args.dataset in {"Chameleon", "Squirrel"}:
-        wiki_name = args.dataset.lower()
-        return WikipediaNetwork(str(args.data_root), name=wiki_name, transform=T.AddSelfLoops())
-
-    dataset_class = _load_ogb_dataset_class()
-    return dataset_class(name=args.dataset, transform=T.AddSelfLoops())
+    return load_node_dataset(args.dataset, args.data_root)
 
 
 def apply_training_graph_transform(data: Data, args: argparse.Namespace) -> Data:
@@ -482,24 +451,15 @@ def main() -> None:
         logging.error(message)
         raise RuntimeError(message)
 
-    if args.dataset not in {"ogbn-arxiv", "ogbn-papers100M"}:
-        data.train_mask, data.val_mask, data.test_mask = create_masks(
-            data,
-            args.train_per_class,
-            args.num_val,
-            args.num_test,
-            seed=args.seed,
-        )
-    else:
-        split_idx = dataset.get_idx_split()
-        train_idx, valid_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
-
-        data.train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-        data.val_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-        data.test_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-        data.train_mask[train_idx] = True
-        data.val_mask[valid_idx] = True
-        data.test_mask[test_idx] = True
+    apply_node_splits(
+        dataset,
+        data,
+        args.dataset,
+        train_per_class=args.train_per_class,
+        num_val=args.num_val,
+        num_test=args.num_test,
+        seed=args.seed,
+    )
 
     data = apply_training_graph_transform(data, args)
     data = data.to(args.device)
