@@ -5,7 +5,8 @@ capacity constraints before training. The current code supports spectral graph
 operators analytically and GAT-style attention message passing through an
 empirical variance calibration workflow.
 
-Paper draft: https://arxiv.org/abs/2511.06443
+Arxiv vesrion: https://arxiv.org/abs/2511.06443
+Published version: https://ojs.aaai.org/index.php/AAAI/article/view/40012
 
 ## Installation
 
