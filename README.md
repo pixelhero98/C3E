@@ -5,8 +5,7 @@ capacity constraints before training. The current code supports spectral graph
 operators analytically and GAT-style attention message passing through an
 empirical variance calibration workflow.
 
-Arxiv vesrion: https://arxiv.org/abs/2511.06443
-Published version: https://ojs.aaai.org/index.php/AAAI/article/view/40012
+Paper draft: https://arxiv.org/abs/2511.06443
 
 ## Installation
 
@@ -31,6 +30,10 @@ python -m pip install torch-geometric torch-sparse ogb
 All commands below are intended to run from the repository root. Datasets are
 stored in `data/`, checkpoints in `saved/`, and summaries in `results/` by
 default. These generated directories are ignored by git.
+
+Public tools accept `--dataset`; `Cora` is the quick-start default. The shared
+dataset loader supports `Cora`, `CiteSeer`, `PubMed`, `Chameleon`, `Squirrel`,
+`AmazonPhoto`, `AmazonComputers`, `ogbn-arxiv`, and `ogbn-papers100M`.
 
 ## Spectral C3E Optimization
 
@@ -66,10 +69,11 @@ Important defaults:
 - `--activation_kind prelu` can be switched to `silu` or `gelu`.
 - Residual projections are used after layer 1 for estimated deep candidates.
 
-Run an all-operation Cora screen:
+Run an all-operation screen:
 
 ```bash
-python tools/run_cora_eta045_all_ops.py \
+python tools/run_all_ops.py \
+  --dataset Cora \
   --eta 0.45 \
   --max-layers 9 \
   --epochs 20 \
@@ -92,7 +96,8 @@ C3E estimator.
 1. Probe empirical GAT attention variance:
 
 ```bash
-python tools/run_cora_gat_variance_probe.py \
+python tools/run_gat_variance_probe.py \
+  --dataset Cora \
   --widths 16 64 128 \
   --heads 2 \
   --epochs 50 \
@@ -103,19 +108,21 @@ python tools/run_cora_gat_variance_probe.py \
 2. Estimate C3E GAT candidates from the probe:
 
 ```bash
-python tools/inspect_cora_gat_c3e.py \
+python tools/inspect_gat_c3e.py \
+  --dataset Cora \
   --eta 0.45 \
   --max-layers 9 \
   --variance-guard-ratio 0.95
 ```
 
 If `--probe-summary` is omitted, the estimator uses the newest
-`results/cora_gat_variance_probe_*/summary.csv`.
+`results/<dataset>_gat_variance_probe_*/summary.csv`.
 
 3. Train the estimated residual GAT candidates:
 
 ```bash
-python tools/run_cora_gat_c3e_candidates.py \
+python tools/run_gat_c3e_candidates.py \
+  --dataset Cora \
   --heads 2 \
   --epochs 50 \
   --patience 10 \
@@ -126,12 +133,13 @@ python tools/run_cora_gat_c3e_candidates.py \
 ```
 
 If `--candidate-summary` is omitted, the trainer uses the newest
-`results/cora_gat_c3e_*/summary.csv`.
+`results/<dataset>_gat_c3e_*/summary.csv`.
 
 4. Run the full activation search:
 
 ```bash
-python tools/run_cora_gat_activation_grid.py \
+python tools/run_gat_activation_grid.py \
+  --dataset Cora \
   --heads 2 \
   --epochs 50 \
   --patience 10 \
@@ -162,8 +170,8 @@ estimator is added.
 python -m ruff check . --exclude data --exclude saved --exclude results
 python -m pytest tests
 python -m Implementations.train_val_test --help
-python tools/run_cora_gat_c3e_candidates.py --help
-python tools/run_cora_gat_activation_grid.py --help
+python tools/run_gat_c3e_candidates.py --help
+python tools/run_gat_activation_grid.py --help
 ```
 
 The test suite covers variance guarding, C3E candidate filtering, activation
