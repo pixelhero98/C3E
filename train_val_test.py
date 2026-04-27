@@ -1,0 +1,525 @@
+"""
+Example usage:
+
+    # Default settings on Cora (data in ~/data, outputs in ~/saved):
+    python3 train_val_test.py
+
+    # Using CiteSeer, custom paths, and tuned hyperparams:
+    python3 train_val_test.py \
+        --dataset CiteSeer \
+        --data_root /path/to/data \
+        --save_dir /path/to/checkpoints \
+        --epochs 300 \
+        --lr 1e-3 \
+        --weight_decay 1e-4 \
+        --eta 0.7 \
+        --patience 50 \
+        --prop_method gcn \
+        --seed 123
+
+"""
+
+import argparse
+import logging
+import random
+import sys
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
+
+import numpy as np
+import torch
+import torch.backends.cudnn as cudnn
+import torch_geometric.transforms as T
+from torch_geometric.data import Data
+from tqdm import tqdm
+
+# Ensure repository-local imports work regardless of invocation directory.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from Model_factory.activations import (  # noqa: E402
+    ACTIVATION_KINDS,
+    ACTIVATION_MODE_CHOICES,
+    activation_flags,
+    normalize_activation_mode,
+)
+from Model_factory.model import Model  # noqa: E402
+from Visualizations.entropy_energy import dirichlet_energy, representation_entropy  # noqa: E402
+
+if __package__:
+    from .c3e import ChanCapConEst
+    from .datasets import DATASET_CHOICES, apply_node_splits, load_node_dataset
+    from .propanalyzer import PropagationVarianceAnalyzer, apply_variance_guard
+    from .utility import save_checkpoint, test, train, val
+else:
+    from c3e import ChanCapConEst
+    from datasets import DATASET_CHOICES, apply_node_splits, load_node_dataset
+    from propanalyzer import PropagationVarianceAnalyzer, apply_variance_guard
+    from utility import save_checkpoint, test, train, val
+
+
+CONV_METHOD_ALIASES = {
+    "gcn": "gcn",
+    "appnp": "appnp",
+    "gdc": "gdc",
+    "sgc": "sgc",
+    "chebnetii": "chebnetii",
+    "gprgnn": "gprgnn",
+    "jacobiconv": "jacobiconv",
+    "s2gc": "s2gc",
+}
+
+
+def set_seed(seed: int) -> None:
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    cudnn.deterministic = True
+    cudnn.benchmark = False
+
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description="Train GCN on Planetoid dataset with capacity estimation."
+    )
+    parser.add_argument(
+        "--data_root", type=Path, default=Path.home() / "data", help="Root directory for datasets"
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=Path,
+        default=Path.home() / "saved",
+        help="Directory to save models and logs",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="Cora",
+        choices=DATASET_CHOICES,
+        help="Node-classification dataset name",
+    )
+    parser.add_argument("--epochs", type=int, default=500, help="Maximum number of training epochs")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument(
+        "--weight_decay", type=float, default=5e-4, help="Weight decay (L2 regularization)"
+    )
+    parser.add_argument(
+        "--eta", type=float, default=0.5, help="Eta parameter for capacity estimator"
+    )
+    parser.add_argument(
+        "--patience", type=int, default=20, help="Early stopping patience (in epochs)"
+    )
+    parser.add_argument(
+        "--prop_method",
+        type=str,
+        default="gcn",
+        choices=["gcn", "appnp", "gdc", "sgc", "chebnetii", "gprgnn", "jacobiconv", "s2gc"],
+        help="Propagation method",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--train_per_class", type=int, default=20, help="Number of node per class")
+    parser.add_argument("--num_val", type=int, default=500, help="Number of node for validation")
+    parser.add_argument("--num_test", type=int, default=1000, help="Number of node for test")
+    parser.add_argument(
+        "--max_layers", type=int, default=100, help="Maximum propagation depth explored by C3E."
+    )
+    parser.add_argument(
+        "--sigma_profile",
+        type=str,
+        default="layerwise",
+        choices=["global", "layerwise"],
+        help="Use one global propagation variance or layer-wise variances.",
+    )
+    parser.add_argument(
+        "--variance_guard_ratio",
+        type=float,
+        default=0.95,
+        help=(
+            "Layerwise variance guard ratio in [0, 1]. "
+            "Use 0 to disable; default 0.95 floors sigma[l] by 0.95*sigma[l-1]."
+        ),
+    )
+    parser.add_argument(
+        "--activation_mode",
+        choices=ACTIVATION_MODE_CHOICES,
+        default="first-on",
+        help="Activation placement: first-on, all-on, all-off, or legacy aliases.",
+    )
+    parser.add_argument(
+        "--activation_kind",
+        choices=ACTIVATION_KINDS,
+        default="prelu",
+        help="Hidden activation function used by estimated architectures.",
+    )
+    parser.add_argument(
+        "--device", choices=["cpu", "cuda"], default="cuda" if torch.cuda.is_available() else "cpu"
+    )
+
+    args = parser.parse_args()
+    if not 0.0 <= args.variance_guard_ratio <= 1.0:
+        parser.error("--variance_guard_ratio must be in [0.0, 1.0].")
+    args.activation_mode = normalize_activation_mode(args.activation_mode)
+    args.activation_kind = args.activation_kind.strip().lower()
+    return args
+
+
+def setup_logging(save_dir: Path) -> None:
+    """Initialise file and console logging in ``save_dir``."""
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=save_dir / "training.log",
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S")
+    console.setFormatter(formatter)
+    logging.getLogger().addHandler(console)
+
+
+def _format_layers(layers: Sequence[int]) -> str:
+    """Format layer sizes for checkpoint filenames."""
+    return "-".join(str(int(layer_width)) for layer_width in layers)
+
+
+def load_dataset(args: argparse.Namespace):
+    """Construct the dataset requested by the CLI arguments."""
+    return load_node_dataset(args.dataset, args.data_root)
+
+
+def apply_training_graph_transform(data: Data, args: argparse.Namespace) -> Data:
+    """Apply graph-operation-specific preprocessing used by the training graph."""
+    if args.prop_method != "gdc":
+        return data
+
+    transform = T.GDC(
+        self_loop_weight=1.0,
+        normalization_in="sym",
+        normalization_out="col",
+        diffusion_kwargs={"method": "ppr", "alpha": 0.05},
+        sparsification_kwargs={"method": "topk", "k": 64, "dim": 0},
+        exact=True,
+    )
+    transformed = transform(data.clone())
+    logging.info(
+        "Applied GDC training transform: edges %d -> %d",
+        int(data.edge_index.size(1)),
+        int(transformed.edge_index.size(1)),
+    )
+    return transformed
+
+
+def filter_penalty_solutions(
+    rounded_layers: Sequence[Sequence[int]],
+    dropout_schedules: Sequence[Sequence[float]],
+    channel_caps: Sequence[float],
+    penalty: float,
+) -> Tuple[List[Sequence[int]], List[Sequence[float]], List[float], int]:
+    """Drop architectures whose capacity is still the optimizer penalty sentinel."""
+    penalty_cutoff = -0.5 * penalty
+    valid_solutions = [
+        (layers, dropout, capacity)
+        for layers, dropout, capacity in zip(rounded_layers, dropout_schedules, channel_caps)
+        if capacity > penalty_cutoff
+    ]
+    skipped_count = len(rounded_layers) - len(valid_solutions)
+    if not valid_solutions:
+        return [], [], [], skipped_count
+    layers, dropouts, capacities = zip(*valid_solutions)
+    return list(layers), list(dropouts), list(capacities), skipped_count
+
+
+def run_solution(
+    data: Data,
+    dataset,
+    layers: Sequence[int],
+    dropout: Sequence[float],
+    channel_capacity: float,
+    args: argparse.Namespace,
+) -> Tuple[float, float, Path]:
+    """Train a candidate architecture and return (best_val_acc, test_acc_at_best_val, checkpoint_path)."""
+
+    prop_layer_sizes = list(layers)
+    drop_probs = list(dropout)
+    channel_str = f"{channel_capacity:.6g}".replace(".", "p")
+    sol_dir = args.save_dir / f"sol_{channel_str}"
+    sol_dir.mkdir(parents=True, exist_ok=True)
+
+    conv_method = CONV_METHOD_ALIASES.get(args.prop_method, args.prop_method)
+    activation_mode = normalize_activation_mode(getattr(args, "activation_mode", "first-on"))
+    activation_kind = getattr(args, "activation_kind", "prelu")
+    use_activations = activation_flags(activation_mode, len(prop_layer_sizes))
+
+    model = Model(
+        prop_layer=[data.x.shape[1]] + prop_layer_sizes,
+        num_class=dataset.num_classes,
+        drop_probs=drop_probs,
+        use_activations=use_activations,
+        activation_mode=activation_mode,
+        activation_kind=activation_kind,
+        conv_methods=conv_method,
+    ).to(args.device)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="max",
+        factor=0.5,
+        patience=10,
+    )
+
+    best_val, best_test = float("-inf"), 0.0
+    best_checkpoint: Optional[Path] = None
+    epochs_no_improve = 0
+    logging.info(
+        "Starting training for solution: layers=%s, dropout=%s", prop_layer_sizes, drop_probs
+    )
+
+    try:
+        for epoch in tqdm(range(1, args.epochs + 1), desc=f"Sol {channel_str}", file=sys.stdout):
+            loss = train(model, data, optimizer)
+            val_acc = val(model, data)
+
+            scheduler.step(val_acc)
+
+            if epoch % 10 == 0 or epoch == 1:
+                logging.info(
+                    "Epoch %d | loss=%.4f | val=%.4f",
+                    epoch,
+                    loss,
+                    val_acc,
+                )
+
+            if val_acc > best_val:
+                best_val = val_acc
+                epochs_no_improve = 0
+                best_test = test(model, data)  # evaluate only at best validation checkpoint
+                best_checkpoint = save_checkpoint(
+                    sol_dir=sol_dir,
+                    layer_str=_format_layers(prop_layer_sizes),
+                    epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    best_val=best_val,
+                    layer_sizes=prop_layer_sizes,
+                    dropout=drop_probs,
+                    extra_metadata={
+                        "activation_mode": activation_mode,
+                        "activation_kind": activation_kind,
+                        "use_activations": use_activations,
+                    },
+                )
+            else:
+                epochs_no_improve += 1
+
+            if epochs_no_improve >= args.patience:
+                logging.info("No improvement for %d epochs. Early stopping.", args.patience)
+                break
+
+        logging.info(
+            "Solution: %s | Channel Capacity: %.4f | best_val=%.4f | test@best_val=%.4f",
+            prop_layer_sizes,
+            channel_capacity,
+            best_val,
+            best_test,
+        )
+
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging.error("Error in solution %s: %s", channel_str, exc, exc_info=True)
+        raise RuntimeError(f"Training failed for solution {channel_str}.") from exc
+
+    finally:
+        del model, optimizer, scheduler
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if best_checkpoint is None:
+        checkpoints = sorted(sol_dir.glob("best_val_*.pt"))
+        if checkpoints:
+            best_checkpoint = checkpoints[-1]
+        else:
+            raise RuntimeError(f"No checkpoints saved for solution {channel_str}.")
+
+    return best_val, best_test, best_checkpoint
+
+
+def main() -> None:
+    args = parse_args()
+    setup_logging(args.save_dir)
+    logging.info("Arguments: %s", args)
+    set_seed(args.seed)
+
+    try:
+        dataset = load_dataset(args)
+    except ModuleNotFoundError:
+        logging.exception("Dataset initialisation failed.")
+        raise
+
+    val_results: List[float] = []
+    test_results: List[float] = []
+    checkpoint_paths: List[Path] = []
+    data = dataset[0]
+    num_nodes = data.x.size(0)
+    if num_nodes <= 0:
+        message = "Dataset contains no nodes; cannot proceed with training."
+        logging.error(message)
+        raise ValueError(message)
+
+    H = float(np.log(num_nodes))
+    analyzer = PropagationVarianceAnalyzer(data, method=args.prop_method)
+    if args.sigma_profile == "global":
+        sigma_s = float(analyzer.compute_variance())
+        sigma_s = max(sigma_s, float(np.finfo(np.float64).eps))
+        logging.info("Using global propagation variance sigma_s=%.6e", sigma_s)
+    else:
+        raw_sigma_s = analyzer.compute_layerwise_variances(depth=args.max_layers)
+        raw_sigma_s = np.maximum(raw_sigma_s, float(np.finfo(np.float64).eps))
+        sigma_s = apply_variance_guard(raw_sigma_s, args.variance_guard_ratio)
+        changed = int(np.sum(sigma_s > raw_sigma_s))
+        logging.info(
+            "Raw layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
+            np.array2string(raw_sigma_s[:5], precision=3, separator=", "),
+            len(raw_sigma_s),
+        )
+        logging.info(
+            "Using variance guard ratio=%.3f; changed %d/%d layer variance(s)",
+            args.variance_guard_ratio,
+            changed,
+            len(raw_sigma_s),
+        )
+        logging.info(
+            "Guarded layer-wise propagation variance sigma_s[0:5]=%s (len=%d)",
+            np.array2string(sigma_s[:5], precision=3, separator=", "),
+            len(sigma_s),
+        )
+    try:
+        optimiser = ChanCapConEst(data=data, sigma_s=sigma_s, eta=args.eta)
+        solutions = optimiser.optimize_weights(H=H, max_layers=args.max_layers)
+    except Exception as exc:
+        logging.error("Capacity estimator failed: %s", exc, exc_info=True)
+        raise RuntimeError("Capacity estimator failed.") from exc
+
+    if not solutions:
+        message = "No solutions produced by capacity estimator."
+        logging.error(message)
+        raise RuntimeError(message)
+
+    if len(solutions) != 3:
+        logging.error("Unexpected solution structure returned by optimiser: %s", solutions)
+        raise RuntimeError("Unexpected solution structure returned by optimiser.")
+
+    rounded_layers, dropout_schedules, channel_caps = solutions
+
+    if not (rounded_layers and dropout_schedules and channel_caps):
+        logging.error("Optimiser returned empty solution components: %s", solutions)
+        raise RuntimeError("Optimiser returned empty solution components.")
+
+    if not (len(rounded_layers) == len(dropout_schedules) == len(channel_caps)):
+        logging.error(
+            "Optimiser produced mismatched component lengths: %s",
+            {
+                "layers": len(rounded_layers),
+                "dropout": len(dropout_schedules),
+                "capacity": len(channel_caps),
+            },
+        )
+        raise RuntimeError("Optimiser produced mismatched component lengths.")
+
+    rounded_layers, dropout_schedules, channel_caps, skipped_count = filter_penalty_solutions(
+        rounded_layers,
+        dropout_schedules,
+        channel_caps,
+        optimiser.penalty,
+    )
+    if skipped_count:
+        logging.warning("Skipped %d penalty-state architecture(s).", skipped_count)
+    if not rounded_layers:
+        message = "No non-penalty architectures produced by capacity estimator."
+        logging.error(message)
+        raise RuntimeError(message)
+
+    apply_node_splits(
+        dataset,
+        data,
+        args.dataset,
+        train_per_class=args.train_per_class,
+        num_val=args.num_val,
+        num_test=args.num_test,
+        seed=args.seed,
+    )
+
+    data = apply_training_graph_transform(data, args)
+    data = data.to(args.device)
+    for layers, dropout, channel_capacity in zip(rounded_layers, dropout_schedules, channel_caps):
+        best_val, test_at_best_val, checkpoint = run_solution(
+            data, dataset, layers, dropout, channel_capacity, args
+        )
+        val_results.append(best_val)
+        test_results.append(test_at_best_val)
+        checkpoint_paths.append(checkpoint)
+
+    if not val_results:
+        message = "No feasible solutions were trained."
+        logging.error(message)
+        raise RuntimeError(message)
+
+    opt_result_index = max(range(len(val_results)), key=val_results.__getitem__)
+    best_layers = rounded_layers[opt_result_index]
+    best_dropouts = dropout_schedules[opt_result_index]
+    best_performance = test_results[opt_result_index]
+    best_checkpoint = checkpoint_paths[opt_result_index]
+
+    logging.info(
+        "Best solution index=%d | layers=%s | dropouts=%s | test@best_val=%.4f | checkpoint=%s",
+        opt_result_index,
+        best_layers,
+        best_dropouts,
+        best_performance,
+        best_checkpoint,
+    )
+
+    use_activations = activation_flags(args.activation_mode, len(best_layers))
+    prop_layers = [data.x.shape[1]] + best_layers
+
+    rep_entropy = representation_entropy(
+        best_checkpoint,
+        args.device,
+        prop_layers,
+        dataset.num_classes,
+        best_dropouts,
+        use_activations,
+        args.prop_method,
+        data,
+        nbins=2000,
+    )
+    rep_energy = dirichlet_energy(
+        best_checkpoint,
+        args.device,
+        prop_layers,
+        dataset.num_classes,
+        best_dropouts,
+        use_activations,
+        args.prop_method,
+        data,
+        normalized=True,
+    )
+
+    logging.info("Representation entropy: %s", rep_entropy)
+    logging.info("Dirichlet energy: %s", rep_energy)
+
+
+if __name__ == "__main__":
+    main()
