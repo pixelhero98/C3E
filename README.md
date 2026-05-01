@@ -1,5 +1,10 @@
 # C3E: Channel Capacity Constrained Estimation
 
+Official implementation for:
+
+> How Wide and How Deep? Mitigating Over-squashing of GNNs via Channel Capacity Constrained Estimation.
+> In Proceedings of the AAAI Conference on Artificial Intelligence (Vol. 40, No. 33, pp. 27890-27898).
+
 C3E estimates candidate graph neural network architectures by matching channel
 capacity constraints before training. The current code supports spectral graph
 operators analytically and GAT-style attention message passing through an
